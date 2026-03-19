@@ -36,6 +36,12 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="campaign"
+        options={{
+          title: 'Campaign',
+        }}
+      />
+      <Tabs.Screen
         name="xp"
         options={{
           title: 'XP',

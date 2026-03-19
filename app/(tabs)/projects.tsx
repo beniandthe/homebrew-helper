@@ -19,7 +19,7 @@ type SavedProject = {
   updated_at: string;
 };
 
-type ProjectFilter = 'all' | 'xp' | 'encounter' | 'loot' | 'quest';
+type ProjectFilter = 'all' | 'campaign' | 'xp' | 'encounter' | 'loot' | 'quest';
 
 function showMessage(title: string, message: string) {
   if (Platform.OS === 'web') {
@@ -73,6 +73,7 @@ export default function ProjectsScreen() {
     }
 
     const toolTypeMap: Record<Exclude<ProjectFilter, 'all'>, string> = {
+      campaign: 'campaign_hub',
       xp: 'xp_calculator',
       encounter: 'encounter_calculator',
       loot: 'loot_generator',
@@ -272,6 +273,14 @@ export default function ProjectsScreen() {
                   style={styles.projectInfo}
                   onPress={() => {
                     if (renamingId === item.id) return;
+
+                    if (item.tool_type === 'campaign_hub') {
+                      router.push({
+                        pathname: '/campaign',
+                        params: { projectId: item.id },
+                      });
+                      return;
+                    }
 
                     if (item.tool_type === 'xp_calculator') {
                       router.push({

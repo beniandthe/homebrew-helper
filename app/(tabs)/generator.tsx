@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+
 import { useAppState } from '@/contexts/AppStateContext';
 import { ProCard } from '@/components/ProCard';
+import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Heading, Label } from '@/components/AppText';
 import { Card } from '@/components/Card';
@@ -12,13 +14,19 @@ import { supabase } from '@/lib/supabase';
 
 type LootRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
 type RewardType = 'gear' | 'gold' | 'consumable' | 'material';
+type RewardSource = 'boss' | 'chest' | 'quest' | 'vendor' | 'faction';
+type RewardTheme = 'arcane' | 'divine' | 'cursed' | 'martial' | 'wilderness' | 'noble';
+type BundleStyle = 'lean' | 'balanced' | 'generous';
 
 type LootProjectData = {
   playerLevel?: number;
   enemyTier?: number;
   rewardType?: RewardType;
   rarity?: LootRarity;
-  goldAmount?: number;
+  rewardSource?: RewardSource;
+  rewardTheme?: RewardTheme;
+  bundleStyle?: BundleStyle;
+  prepNotes?: string;
 };
 
 function showMessage(title: string, message: string) {
@@ -37,10 +45,16 @@ export default function LootScreen() {
   const [enemyTier, setEnemyTier] = useState('1');
   const [rewardType, setRewardType] = useState<RewardType>('gear');
   const [rarity, setRarity] = useState<LootRarity>('common');
+  const [rewardSource, setRewardSource] = useState<RewardSource>('chest');
+  const [rewardTheme, setRewardTheme] = useState<RewardTheme>('martial');
+  const [bundleStyle, setBundleStyle] = useState<BundleStyle>('balanced');
+  const [prepNotes, setPrepNotes] = useState('');
+
   const [loadingProject, setLoadingProject] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
   const {
     userId: sessionUserId,
     isPro,
@@ -49,11 +63,9 @@ export default function LootScreen() {
     refreshAppState,
   } = useAppState();
 
-
   const maxFreeSaves = 3;
   const isAtFreeLimit = !isPro && savedProjectCount >= maxFreeSaves;
   const isCreatingNewProject = !currentProjectId;
-
 
   async function getLatestSaveAccess(userId: string) {
     if (!supabase) {
@@ -136,6 +148,39 @@ export default function LootScreen() {
           setRarity(projectData.rarity);
         }
 
+        if (
+          projectData.rewardSource === 'boss' ||
+          projectData.rewardSource === 'chest' ||
+          projectData.rewardSource === 'quest' ||
+          projectData.rewardSource === 'vendor' ||
+          projectData.rewardSource === 'faction'
+        ) {
+          setRewardSource(projectData.rewardSource);
+        }
+
+        if (
+          projectData.rewardTheme === 'arcane' ||
+          projectData.rewardTheme === 'divine' ||
+          projectData.rewardTheme === 'cursed' ||
+          projectData.rewardTheme === 'martial' ||
+          projectData.rewardTheme === 'wilderness' ||
+          projectData.rewardTheme === 'noble'
+        ) {
+          setRewardTheme(projectData.rewardTheme);
+        }
+
+        if (
+          projectData.bundleStyle === 'lean' ||
+          projectData.bundleStyle === 'balanced' ||
+          projectData.bundleStyle === 'generous'
+        ) {
+          setBundleStyle(projectData.bundleStyle);
+        }
+
+        if (typeof projectData.prepNotes === 'string') {
+          setPrepNotes(projectData.prepNotes);
+        }
+
         setLoadedProjectName(data?.name ?? 'Loaded project');
         setCurrentProjectId(data?.id ?? null);
       } finally {
@@ -158,31 +203,121 @@ export default function LootScreen() {
           : rarity === 'rare'
             ? 1.6
             : rarity === 'epic'
-              ? 2.1
-              : 3;
+              ? 2.15
+              : 3.1;
+
+    const sourceMultiplier =
+      rewardSource === 'boss'
+        ? 1.4
+        : rewardSource === 'chest'
+          ? 1.15
+          : rewardSource === 'quest'
+            ? 1.25
+            : rewardSource === 'vendor'
+              ? 0.95
+              : 1.2;
+
+    const bundleMultiplier =
+      bundleStyle === 'lean'
+        ? 0.85
+        : bundleStyle === 'balanced'
+          ? 1
+          : 1.25;
 
     const baseGold = parsedPlayerLevel * parsedEnemyTier * 12;
-    const goldAmount = Math.round(baseGold * rarityMultiplier);
+    const goldAmount = Math.round(baseGold * rarityMultiplier * sourceMultiplier * bundleMultiplier);
 
-    const itemPool =
-      rewardType === 'gear'
-        ? ['Iron Blade', 'Hunter Bow', 'Runed Shield', 'Traveler Armor', 'Moon Dagger']
-        : rewardType === 'gold'
-          ? ['Coin Cache', 'Treasure Purse', 'Vault Key', 'Merchant Scrip', 'Tax Chest']
-          : rewardType === 'consumable'
-            ? ['Healing Draught', 'Fire Flask', 'Antidote Kit', 'Smoke Bomb', 'Mana Tonic']
-            : ['Iron Ore', 'Essence Shard', 'Ancient Bark', 'Beast Pelt', 'Arcane Dust'];
+    const themedItems: Record<RewardTheme, Record<RewardType, string[]>> = {
+      arcane: {
+        gear: ['Runed Focus', 'Spellthread Cloak', 'Sigil Rod', 'Aether Band', 'Moonglass Dagger'],
+        gold: ['Mage Stipend', 'Sealed Coin Tube', 'Arcane Treasury Token', 'Guild Payout', 'Star Mint Scrip'],
+        consumable: ['Mana Tonic', 'Blink Dust', 'Scroll of Sparks', 'Elixir of Clarity', 'Ward Oil'],
+        material: ['Aether Crystal', 'Spellglass Shard', 'Runic Ink', 'Leyroot Fiber', 'Moonstone Dust'],
+      },
+      divine: {
+        gear: ['Blessed Shield', 'Sunmetal Charm', 'Saint’s Cloak', 'Votive Blade', 'Halo Pendant'],
+        gold: ['Temple Tithe', 'Pilgrim Offering', 'Consecrated Coin Roll', 'Relic Fund', 'Blessed Purse'],
+        consumable: ['Healing Draught', 'Holy Water Flask', 'Incense Bundle', 'Prayer Candle Kit', 'Purity Tonic'],
+        material: ['Silver Filament', 'Blessed Resin', 'Sanctified Ash', 'Dawn Petal', 'Halo Sand'],
+      },
+      cursed: {
+        gear: ['Hexbound Ring', 'Blood-etched Knife', 'Wailing Locket', 'Shadowmail', 'Marked Bow'],
+        gold: ['Black Coin Pouch', 'Forbidden Tribute', 'Grave Mint Coins', 'Night Tax Chest', 'Sin Ledger Voucher'],
+        consumable: ['Rot Flask', 'Nightshade Tonic', 'Ash Smoke Bomb', 'Curse Ink Vial', 'Bone Elixir'],
+        material: ['Witchbone Dust', 'Rot Resin', 'Shade Thread', 'Black Salt', 'Grave Wax'],
+      },
+      martial: {
+        gear: ['Iron Blade', 'Hunter Bow', 'Runed Shield', 'Traveler Armor', 'Moon Dagger'],
+        gold: ['Mercenary Purse', 'War Chest Coins', 'Captain’s Payout', 'Field Bounty', 'Supply Voucher'],
+        consumable: ['Battle Tonic', 'Fire Flask', 'Sharpening Oil', 'Smoke Bomb', 'Stamina Draught'],
+        material: ['Iron Ore', 'Hardened Leather', 'Weapon Resin', 'Steel Rivets', 'Arrow Fletching'],
+      },
+      wilderness: {
+        gear: ['Thorn Knife', 'Ranger Hood', 'Bone Charm', 'Mosscloak', 'Trail Bow'],
+        gold: ['Ranger Cache', 'Hunter’s Purse', 'Frontier Scrip', 'Camp Payout', 'Forest Trade Coin'],
+        consumable: ['Antidote Kit', 'Healing Herb Pack', 'Beast Lure', 'Trail Ration Bundle', 'Camouflage Paste'],
+        material: ['Ancient Bark', 'Beast Pelt', 'Green Resin', 'Feather Bundle', 'Spirit Herb'],
+      },
+      noble: {
+        gear: ['Signet Rapier', 'Velvet Mantle', 'House Brooch', 'Court Dagger', 'Gilded Buckler'],
+        gold: ['Estate Purse', 'Court Reward', 'Tax Ledger Coin', 'Patron’s Gift', 'Silkbound Pouch'],
+        consumable: ['Perfumed Tonic', 'Courtly Elixir', 'Fine Oil Flask', 'Banquet Reserve', 'Luxury Remedy'],
+        material: ['Silk Thread', 'Gold Leaf', 'Fine Leather', 'Pearl Dust', 'Polished Lacquer'],
+      },
+    };
 
-    const itemIndex = (parsedPlayerLevel + parsedEnemyTier + rewardType.length + rarity.length) % itemPool.length;
+    const flavorNotes: Record<RewardSource, string> = {
+      boss: 'Boss rewards should feel memorable and include at least one standout element.',
+      chest: 'Chest rewards should feel discoverable and satisfying without overshadowing milestone rewards.',
+      quest: 'Quest rewards should reflect story effort, faction trust, or completion significance.',
+      vendor: 'Vendor rewards should be practical and priced like curated stock, not dramatic treasure spikes.',
+      faction: 'Faction rewards should reinforce identity, loyalty, and world politics.',
+    };
+
+    const itemPool = themedItems[rewardTheme][rewardType];
+    const seed = parsedPlayerLevel * 7 + parsedEnemyTier * 13 + rewardTheme.length * 5 + rewardSource.length * 3 + rarity.length;
+    const itemIndex = seed % itemPool.length;
     const itemName = itemPool[itemIndex];
 
+    const bonusPool =
+      bundleStyle === 'lean'
+        ? ['small currency bonus', 'one practical extra consumable', 'minor crafting add-on']
+        : bundleStyle === 'balanced'
+          ? ['supplemental crafting materials', 'backup consumable pack', 'small secondary item']
+          : ['bonus rare material bundle', 'secondary themed item', 'extra coin cache'];
+
+    const bonusItem = bonusPool[seed % bonusPool.length];
+
+    const practicalAdvice: string[] = [];
+
+    if (rewardSource === 'boss') {
+      practicalAdvice.push('Boss rewards feel best when at least one item changes future player choices.');
+    }
+    if (rewardType === 'gold' && rarity !== 'common') {
+      practicalAdvice.push('High-rarity pure gold can feel flat. Consider pairing it with one named item or hook.');
+    }
+    if (rewardType === 'material') {
+      practicalAdvice.push('Material rewards are stronger when tied to crafting, upgrades, or a known NPC artisan.');
+    }
+    if (rewardSource === 'vendor') {
+      practicalAdvice.push('Vendor rewards should stay useful and dependable rather than wildly swingy.');
+    }
+    if (bundleStyle === 'generous') {
+      practicalAdvice.push('Generous bundles are best used for bosses, milestone quests, or major world progress.');
+    }
+    if (practicalAdvice.length === 0) {
+      practicalAdvice.push('This reward bundle is broadly usable as-is for a typical session reward.');
+    }
+
     return {
-      goldAmount,
       itemName,
-      rarity,
-      rewardType,
+      bonusItem,
+      goldAmount,
+      flavorNote: flavorNotes[rewardSource],
+      practicalAdvice,
+      rewardSummary: `${rarity} ${rewardTheme} ${rewardType} reward from a ${rewardSource} source.`,
     };
-  }, [playerLevel, enemyTier, rewardType, rarity]);
+  }, [playerLevel, enemyTier, rewardType, rarity, rewardSource, rewardTheme, bundleStyle]);
 
   async function handleSaveProject(asNew = false) {
     if (!supabase) {
@@ -203,8 +338,11 @@ export default function LootScreen() {
         enemyTier: Number.parseInt(enemyTier || '1', 10),
         rewardType,
         rarity,
-        goldAmount: result.goldAmount,
-        itemName: result.itemName,
+        rewardSource,
+        rewardTheme,
+        bundleStyle,
+        prepNotes,
+        result,
       };
 
       const timestampName = `Loot - ${new Date().toLocaleString()}`;
@@ -225,6 +363,7 @@ export default function LootScreen() {
           return;
         }
 
+        await refreshAppState();
         showMessage('Updated', 'Your loot project was updated successfully.');
         return;
       }
@@ -275,9 +414,9 @@ export default function LootScreen() {
   return (
     <Screen>
       <Card>
-        <Heading>Loot Generator</Heading>
+        <Heading>Reward Designer</Heading>
         <BodyText>
-          Generate a quick reward suggestion based on player level, enemy tier, reward type, and rarity.
+          Build more useful treasure by combining source, theme, rarity, bundle feel, and practical reward advice.
         </BodyText>
       </Card>
 
@@ -357,6 +496,71 @@ export default function LootScreen() {
           })}
         </View>
 
+        <Label>Reward Source</Label>
+        <View style={styles.pillRow}>
+          {(['boss', 'chest', 'quest', 'vendor', 'faction'] as RewardSource[]).map((option) => {
+            const selected = rewardSource === option;
+
+            return (
+              <Pressable
+                key={option}
+                onPress={() => setRewardSource(option)}
+                style={[styles.pill, selected && styles.pillSelected]}
+              >
+                <BodyText style={selected ? styles.pillTextSelected : undefined}>
+                  {option}
+                </BodyText>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Label>Reward Theme</Label>
+        <View style={styles.pillRow}>
+          {(['arcane', 'divine', 'cursed', 'martial', 'wilderness', 'noble'] as RewardTheme[]).map((option) => {
+            const selected = rewardTheme === option;
+
+            return (
+              <Pressable
+                key={option}
+                onPress={() => setRewardTheme(option)}
+                style={[styles.pill, selected && styles.pillSelected]}
+              >
+                <BodyText style={selected ? styles.pillTextSelected : undefined}>
+                  {option}
+                </BodyText>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Label>Bundle Style</Label>
+        <View style={styles.pillRow}>
+          {(['lean', 'balanced', 'generous'] as BundleStyle[]).map((option) => {
+            const selected = bundleStyle === option;
+
+            return (
+              <Pressable
+                key={option}
+                onPress={() => setBundleStyle(option)}
+                style={[styles.pill, selected && styles.pillSelected]}
+              >
+                <BodyText style={selected ? styles.pillTextSelected : undefined}>
+                  {option}
+                </BodyText>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Label>Prep Notes</Label>
+        <AppInput
+          value={prepNotes}
+          onChangeText={setPrepNotes}
+          placeholder="Boss cache, faction-issued reward, reward tied to blacksmith upgrade path..."
+          multiline
+        />
+
         <View style={styles.saveRow}>
           <View style={styles.actionRow}>
             <Pressable
@@ -393,16 +597,40 @@ export default function LootScreen() {
             <BodyText>Not signed in. You can generate loot, but not save yet.</BodyText>
           )}
 
+          {sessionUserId && isCreatingNewProject && isAtFreeLimit ? (
+            <UpgradeBanner
+              title="Free plan limit reached"
+              message="You have used all 3 free saves. Upgrade to Pro to create additional projects."
+              buttonLabel="Upgrade to Pro"
+              onPress={handleUpgradePress}
+            />
+          ) : null}
         </View>
       </Card>
 
       <Card>
-        <Label>Generated Reward</Label>
+        <Label>Reward Summary</Label>
         <View style={styles.resultRow}>
-          <BodyText>Reward type: {result.rewardType}</BodyText>
-          <BodyText>Rarity: {result.rarity}</BodyText>
-          <BodyText>Item: {result.itemName}</BodyText>
+          <BodyText>{result.rewardSummary}</BodyText>
+          <BodyText>Featured item: {result.itemName}</BodyText>
+          <BodyText>Bonus add-on: {result.bonusItem}</BodyText>
           <BodyText>Gold value: {result.goldAmount}</BodyText>
+        </View>
+      </Card>
+
+      <Card>
+        <Label>Source Guidance</Label>
+        <View style={styles.resultRow}>
+          <BodyText>{result.flavorNote}</BodyText>
+        </View>
+      </Card>
+
+      <Card>
+        <Label>Practical Reward Advice</Label>
+        <View style={styles.resultRow}>
+          {result.practicalAdvice.map((entry, index) => (
+            <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+          ))}
         </View>
       </Card>
     </Screen>
@@ -472,6 +700,6 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   resultRow: {
-    gap: 6,
+    gap: 8,
   },
 });
