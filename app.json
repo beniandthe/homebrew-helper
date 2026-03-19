@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "RPG Toolkit",
+    "slug": "rpg-toolkit",
+    "scheme": "rpgtoolkit",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.benjaminrossman.rpgtoolkit"
+    },
+    "android": {
+      "package": "com.benjaminrossman.rpgtoolkit"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    }
+  }
+}
