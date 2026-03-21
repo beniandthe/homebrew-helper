@@ -12,7 +12,7 @@ export default function HomeScreen() {
 
   const maxFreeSaves = 3;
 
-  function goTo(path: '/xp' | '/encounters' | '/generator' | '/quest' | '/projects' | '/pricing') {
+  function goTo(path: '/campaign' | '/xp' | '/encounters' | '/generator' | '/quest' | '/projects' | '/pricing') {
     router.push(path);
   }
 
@@ -61,6 +61,16 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.grid}>
+          <Pressable onPress={() => goTo('/campaign')}>
+            <Card>
+              <Label>Campaign</Label>
+              <Heading style={styles.cardTitle}>Campaign Hub</Heading>
+              <BodyText>
+                Organize campaign identity, party focus, objectives, and session notes in one place.
+              </BodyText>
+            </Card>
+          </Pressable>
+
           <Pressable onPress={() => goTo('/xp')}>
             <Card>
               <Label>XP Calculator</Label>
@@ -100,11 +110,6 @@ export default function HomeScreen() {
               </BodyText>
             </Card>
           </Pressable>
-        </View>
-
-        <View style={styles.sectionHeader}>
-          <Heading style={styles.sectionTitle}>Campaign Management</Heading>
-          <BodyText>Keep your creations organized as your world grows.</BodyText>
         </View>
 
         <Pressable onPress={() => goTo('/projects')}>

@@ -41,27 +41,43 @@ export default function PricingScreen() {
     async function handleDisableProDev() {
         if (!supabase || !userId) return;
 
+        const confirmed =
+            Platform.OS === 'web'
+                ? window.confirm(
+                    'Disabling Pro will permanently delete Campaign Hub workspaces, linked campaign projects, and any standalone projects beyond the 3-project free limit. Continue?'
+                )
+                : await new Promise<boolean>((resolve) => {
+                    Alert.alert(
+                        'Disable Pro',
+                        'This will permanently delete Campaign Hub workspaces, linked campaign projects, and any standalone projects beyond the 3-project free limit.',
+                        [
+                            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                            { text: 'Continue', style: 'destructive', onPress: () => resolve(true) },
+                        ]
+                    );
+                });
+
+        if (!confirmed) return;
+
         try {
             setBusy(true);
 
-            const { error } = await supabase
-                .from('profiles')
-                .upsert({
-                    id: userId,
-                    is_pro: false,
-                });
+            const { error } = await supabase.rpc('downgrade_to_free_and_trim_projects');
 
             if (error) {
-                showMessage('Update failed', error.message);
+                showMessage('Downgrade failed', error.message);
                 return;
             }
 
             await refreshAppState();
-            showMessage('Pro disabled', 'Dev Pro access has been removed from this account.');
+            showMessage(
+                'Pro disabled',
+                'Dev Pro access has been removed. Campaigns, linked campaign projects, and extra standalone projects beyond the free limit were deleted.'
+            );
         } finally {
             setBusy(false);
         }
-    }
+      }
 
     return (
         <Screen>

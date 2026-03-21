@@ -17,6 +17,7 @@ type SavedProject = {
   data: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  campaign_id?: string | null;
 };
 
 type ProjectFilter = 'all' | 'xp' | 'encounter' | 'loot' | 'quest';
@@ -95,6 +96,7 @@ export default function ProjectsScreen() {
         .from('saved_projects')
         .select('*')
         .eq('user_id', userId)
+        .is('campaign_id', null)
         .order('updated_at', { ascending: false });
 
       if (error) {
@@ -273,6 +275,14 @@ export default function ProjectsScreen() {
                   onPress={() => {
                     if (renamingId === item.id) return;
 
+                    if (item.tool_type === 'campaign_hub') {
+                      router.push({
+                        pathname: '/campaign',
+                        params: { projectId: item.id },
+                      });
+                      return;
+                    }
+
                     if (item.tool_type === 'xp_calculator') {
                       router.push({
                         pathname: '/xp',
@@ -339,11 +349,12 @@ export default function ProjectsScreen() {
                       </View>
                     </View>
                   ) : (
-                    <>
-                      <Label>{item.name}</Label>
-                      <BodyText>{item.tool_type}</BodyText>
-                      <BodyText>Updated: {formatDate(item.updated_at)}</BodyText>
-                    </>
+                      <>
+                        <Label>{item.name}</Label>
+                        <BodyText>{item.tool_type}</BodyText>
+                        {item.campaign_id ? <BodyText>Linked to campaign</BodyText> : null}
+                        <BodyText>Updated: {formatDate(item.updated_at)}</BodyText>
+                      </>
                   )}
                 </Pressable>
 

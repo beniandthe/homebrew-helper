@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+
 import { useAppState } from '@/contexts/AppStateContext';
 import { ProCard } from '@/components/ProCard';
+import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Heading, Label } from '@/components/AppText';
 import { Card } from '@/components/Card';
@@ -11,12 +13,24 @@ import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 
 type CurveType = 'linear' | 'smooth' | 'steep';
+type ProgressionPreset = 'slow' | 'standard' | 'heroic' | 'brutal' | 'custom';
+type ProgressionMode = 'xp' | 'milestone';
 
 type XpProjectData = {
   levels?: number;
   baseXp?: number;
   growthFactor?: number;
   curveType?: CurveType;
+  progressionPreset?: ProgressionPreset;
+  progressionMode?: ProgressionMode;
+  encountersPerSession?: number;
+  encountersPerLevel?: number;
+  progressionNotes?: string;
+};
+
+type CampaignOption = {
+  id: string;
+  name: string;
 };
 
 function showMessage(title: string, message: string) {
@@ -30,14 +44,24 @@ function showMessage(title: string, message: string) {
 
 export default function XpCalculatorScreen() {
   const params = useLocalSearchParams<{ projectId?: string }>();
+
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+
   const [levels, setLevels] = useState('20');
   const [baseXp, setBaseXp] = useState('100');
   const [growthFactor, setGrowthFactor] = useState('1.3');
   const [curveType, setCurveType] = useState<CurveType>('smooth');
+
+  const [progressionPreset, setProgressionPreset] = useState<ProgressionPreset>('standard');
+  const [progressionMode, setProgressionMode] = useState<ProgressionMode>('xp');
+  const [encountersPerSession, setEncountersPerSession] = useState('2');
+  const [encountersPerLevel, setEncountersPerLevel] = useState('4');
+  const [progressionNotes, setProgressionNotes] = useState('');
+
   const [saving, setSaving] = useState(false);
+
   const {
     userId: sessionUserId,
     isPro,
@@ -45,11 +69,50 @@ export default function XpCalculatorScreen() {
     loading: loadingSession,
     refreshAppState,
   } = useAppState();
-  
- 
+
   const maxFreeSaves = 3;
   const isAtFreeLimit = !isPro && savedProjectCount >= maxFreeSaves;
   const isCreatingNewProject = !currentProjectId;
+
+  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+
+  function applyPreset(preset: ProgressionPreset) {
+    setProgressionPreset(preset);
+
+    if (preset === 'slow') {
+      setBaseXp('140');
+      setGrowthFactor('1.4');
+      setCurveType('steep');
+      setEncountersPerLevel('6');
+      return;
+    }
+
+    if (preset === 'standard') {
+      setBaseXp('100');
+      setGrowthFactor('1.3');
+      setCurveType('smooth');
+      setEncountersPerLevel('4');
+      return;
+    }
+
+    if (preset === 'heroic') {
+      setBaseXp('80');
+      setGrowthFactor('1.18');
+      setCurveType('smooth');
+      setEncountersPerLevel('3');
+      return;
+    }
+
+    if (preset === 'brutal') {
+      setBaseXp('160');
+      setGrowthFactor('1.45');
+      setCurveType('steep');
+      setEncountersPerLevel('7');
+      return;
+    }
+  }
 
   async function getLatestSaveAccess(userId: string) {
     if (!supabase) {
@@ -82,11 +145,56 @@ export default function XpCalculatorScreen() {
     router.push('/pricing');
   }
 
+  async function loadCampaignOptions() {
+    if (!supabase || !sessionUserId) return;
+
+    try {
+      setLoadingCampaigns(true);
+
+      const { data, error } = await supabase
+        .from('saved_projects')
+        .select('id, name')
+        .eq('user_id', sessionUserId)
+        .eq('tool_type', 'campaign_hub')
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        showMessage('Campaign load failed', error.message);
+        return;
+      }
+
+      setCampaignOptions((data ?? []) as CampaignOption[]);
+    } finally {
+      setLoadingCampaigns(false);
+    }
+  }
+
+  useEffect(() => {
+    if (isPro) {
+      loadCampaignOptions();
+    } else {
+      setCampaignOptions([]);
+      setLoadingCampaigns(false);
+    }
+  }, [sessionUserId, currentProjectId, isPro]);
+
+  useEffect(() => {
+    if (!isPro) {
+      setSelectedCampaignId('');
+    }
+  }, [isPro]);
+
   useEffect(() => {
     async function loadProject() {
       if (!supabase) return;
-      if (!params.projectId) return;
       if (!sessionUserId) return;
+
+      if (!params.projectId) {
+        setLoadedProjectName(null);
+        setCurrentProjectId(null);
+        setSelectedCampaignId('');
+        return;
+      }
 
       try {
         setLoadingProject(true);
@@ -104,6 +212,12 @@ export default function XpCalculatorScreen() {
         }
 
         const projectData = (data?.data ?? {}) as XpProjectData;
+
+        if (typeof data?.campaign_id === 'string' && isPro) {
+          setSelectedCampaignId(data.campaign_id);
+        } else {
+          setSelectedCampaignId('');
+        }
 
         if (typeof projectData.levels === 'number') {
           setLevels(String(projectData.levels));
@@ -125,6 +239,32 @@ export default function XpCalculatorScreen() {
           setCurveType(projectData.curveType);
         }
 
+        if (
+          projectData.progressionPreset === 'slow' ||
+          projectData.progressionPreset === 'standard' ||
+          projectData.progressionPreset === 'heroic' ||
+          projectData.progressionPreset === 'brutal' ||
+          projectData.progressionPreset === 'custom'
+        ) {
+          setProgressionPreset(projectData.progressionPreset);
+        }
+
+        if (projectData.progressionMode === 'xp' || projectData.progressionMode === 'milestone') {
+          setProgressionMode(projectData.progressionMode);
+        }
+
+        if (typeof projectData.encountersPerSession === 'number') {
+          setEncountersPerSession(String(projectData.encountersPerSession));
+        }
+
+        if (typeof projectData.encountersPerLevel === 'number') {
+          setEncountersPerLevel(String(projectData.encountersPerLevel));
+        }
+
+        if (typeof projectData.progressionNotes === 'string') {
+          setProgressionNotes(projectData.progressionNotes);
+        }
+
         setLoadedProjectName(data?.name ?? 'Loaded project');
         setCurrentProjectId(data?.id ?? null);
       } finally {
@@ -133,12 +273,14 @@ export default function XpCalculatorScreen() {
     }
 
     loadProject();
-  }, [params.projectId, sessionUserId]);
+  }, [params.projectId, sessionUserId, isPro]);
 
-  const rows = useMemo(() => {
+  const result = useMemo(() => {
     const parsedLevels = Math.max(1, Number.parseInt(levels || '1', 10));
     const parsedBaseXp = Math.max(1, Number.parseInt(baseXp || '1', 10));
     const parsedGrowthFactor = Math.max(1, Number.parseFloat(growthFactor || '1'));
+    const parsedEncountersPerSession = Math.max(1, Number.parseInt(encountersPerSession || '1', 10));
+    const parsedEncountersPerLevel = Math.max(1, Number.parseInt(encountersPerLevel || '1', 10));
 
     const multiplier =
       curveType === 'linear'
@@ -147,26 +289,103 @@ export default function XpCalculatorScreen() {
           ? parsedGrowthFactor
           : parsedGrowthFactor + 0.15;
 
-    const result = [];
+    const rows = [];
     let total = 0;
 
     for (let level = 1; level <= parsedLevels; level += 1) {
       const xpToNext =
-        curveType === 'linear'
-          ? parsedBaseXp * level
-          : Math.round(parsedBaseXp * Math.pow(multiplier, level - 1));
+        progressionMode === 'milestone'
+          ? 0
+          : curveType === 'linear'
+            ? parsedBaseXp * level
+            : Math.round(parsedBaseXp * Math.pow(multiplier, level - 1));
 
       total += xpToNext;
 
-      result.push({
+      rows.push({
         level,
         xpToNext,
         totalXp: total,
       });
     }
 
-    return result;
-  }, [levels, baseXp, growthFactor, curveType]);
+    const totalEncounterCount = parsedLevels * parsedEncountersPerLevel;
+    const estimatedSessionsToCap = Math.ceil(totalEncounterCount / parsedEncountersPerSession);
+
+    let pacingAssessment = 'Balanced long-form pacing.';
+    if (parsedEncountersPerLevel <= 3) pacingAssessment = 'Fast, heroic pacing with frequent advancement.';
+    if (parsedEncountersPerLevel >= 6) pacingAssessment = 'Slow-burn pacing suited for long campaigns or gritty systems.';
+    if (progressionMode === 'milestone') pacingAssessment = 'Milestone pacing prioritizes narrative beats over combat math.';
+
+    const milestoneSuggestions = [
+      `Level 3: establish subclass, specialization, or defining class identity.`,
+      `Level ${Math.max(4, Math.floor(parsedLevels * 0.35))}: grant a major gear, faction, or narrative unlock.`,
+      `Level ${Math.max(6, Math.floor(parsedLevels * 0.6))}: introduce a strong power spike or campaign shift.`,
+      `Level ${parsedLevels}: reserve for endgame mastery, capstone, or finale content.`,
+    ];
+
+    const practicalAdvice: string[] = [];
+
+    if (progressionMode === 'milestone') {
+      practicalAdvice.push('Use milestone mode when campaign pacing should follow story victories rather than encounter frequency.');
+    } else {
+      practicalAdvice.push('XP mode works best when encounter count and challenge are relatively consistent session to session.');
+    }
+
+    if (parsedEncountersPerSession === 1) {
+      practicalAdvice.push('One encounter per session can make XP pacing feel very slow unless rewards are large or milestone beats are frequent.');
+    }
+
+    if (parsedEncountersPerLevel >= 6) {
+      practicalAdvice.push('High encounters-per-level pacing can create grind unless each level meaningfully changes player options.');
+    }
+
+    if (curveType === 'steep') {
+      practicalAdvice.push('Steep curves are strongest when late-game levels are intentionally rare and dramatic.');
+    }
+
+    if (curveType === 'linear') {
+      practicalAdvice.push('Linear curves are easier to communicate and tune, but may feel less dramatic over time.');
+    }
+
+    if (practicalAdvice.length === 0) {
+      practicalAdvice.push('This progression setup should be broadly usable for a typical campaign arc.');
+    }
+
+    return {
+      rows,
+      totalEncounterCount,
+      estimatedSessionsToCap,
+      pacingAssessment,
+      milestoneSuggestions,
+      practicalAdvice,
+    };
+  }, [
+    levels,
+    baseXp,
+    growthFactor,
+    curveType,
+    progressionMode,
+    encountersPerSession,
+    encountersPerLevel,
+  ]);
+
+  function buildPayload() {
+    return {
+      levels: Number.parseInt(levels || '1', 10),
+      baseXp: Number.parseInt(baseXp || '1', 10),
+      growthFactor: Number.parseFloat(growthFactor || '1'),
+      curveType,
+      progressionPreset,
+      progressionMode,
+      encountersPerSession: Number.parseInt(encountersPerSession || '1', 10),
+      encountersPerLevel: Number.parseInt(encountersPerLevel || '1', 10),
+      progressionNotes,
+      result,
+    };
+  }
+
+  
 
   async function handleSaveProject(asNew = false) {
     if (!supabase) {
@@ -182,15 +401,8 @@ export default function XpCalculatorScreen() {
     try {
       setSaving(true);
 
-      const payload = {
-        levels: Number.parseInt(levels || '1', 10),
-        baseXp: Number.parseInt(baseXp || '1', 10),
-        growthFactor: Number.parseFloat(growthFactor || '1'),
-        curveType,
-        rows,
-      };
-
-      const timestampName = `XP Curve - ${new Date().toLocaleString()}`;
+      const payload = buildPayload();
+      const timestampName = `XP Planner - ${new Date().toLocaleString()}`;
 
       if (!asNew && currentProjectId) {
         const { error } = await supabase
@@ -199,6 +411,7 @@ export default function XpCalculatorScreen() {
             name: loadedProjectName ?? timestampName,
             data: payload,
             updated_at: new Date().toISOString(),
+            campaign_id: null,
           })
           .eq('id', currentProjectId)
           .eq('user_id', sessionUserId);
@@ -208,7 +421,9 @@ export default function XpCalculatorScreen() {
           return;
         }
 
-        showMessage('Updated', 'Your XP project was updated successfully.');
+        await refreshAppState();
+        setSelectedCampaignId('');
+        showMessage('Updated', 'Your progression project was updated successfully.');
         return;
       }
 
@@ -232,6 +447,7 @@ export default function XpCalculatorScreen() {
           name: timestampName,
           tool_type: 'xp_calculator',
           data: payload,
+          campaign_id: null,
         })
         .select()
         .single();
@@ -243,9 +459,10 @@ export default function XpCalculatorScreen() {
 
       setLoadedProjectName(data?.name ?? timestampName);
       setCurrentProjectId(data?.id ?? null);
+      setSelectedCampaignId('');
       await refreshAppState();
 
-      showMessage('Saved', 'Your XP calculator project was saved successfully.');
+      showMessage('Saved', 'Your progression project was saved successfully.');
     } finally {
       setSaving(false);
     }
@@ -255,12 +472,98 @@ export default function XpCalculatorScreen() {
     await handleSaveProject(true);
   }
 
+  async function handleSaveToCampaign() {
+    if (!supabase) {
+      showMessage('Supabase not configured', 'Add your Supabase URL and anon key in the .env file.');
+      return;
+    }
+
+    if (!sessionUserId) {
+      showMessage('Sign in required', 'Go to the Account tab and sign in before saving to a campaign.');
+      return;
+    }
+
+    if (!isPro) {
+      showMessage('Pro required', 'Campaign workspaces are available on Pro.');
+      return;
+    }
+
+    if (!selectedCampaignId) {
+      showMessage('Select a campaign', 'Choose a campaign before adding this project.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      const payload = buildPayload();
+      const timestampName = loadedProjectName ?? `XP Planner - ${new Date().toLocaleString()}`;
+
+      if (currentProjectId) {
+        const { error } = await supabase
+          .from('saved_projects')
+          .update({
+            name: timestampName,
+            data: payload,
+            updated_at: new Date().toISOString(),
+            campaign_id: selectedCampaignId,
+          })
+          .eq('id', currentProjectId)
+          .eq('user_id', sessionUserId);
+
+        if (error) {
+          showMessage('Campaign update failed', error.message);
+          return;
+        }
+
+        await refreshAppState();
+        showMessage('Campaign updated', 'This project is now linked to the selected campaign.');
+        return;
+      }
+
+      const latestAccess = await getLatestSaveAccess(sessionUserId);
+
+      if (!latestAccess.isPro && latestAccess.count >= maxFreeSaves) {
+        showMessage(
+          'Free limit reached',
+          'Free accounts can save up to 3 projects total. Upgrade to Pro for unlimited saves.'
+        );
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('saved_projects')
+        .insert({
+          user_id: sessionUserId,
+          name: timestampName,
+          tool_type: 'xp_calculator',
+          data: payload,
+          campaign_id: selectedCampaignId,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        showMessage('Campaign save failed', error.message);
+        return;
+      }
+
+      setLoadedProjectName(data?.name ?? timestampName);
+      setCurrentProjectId(data?.id ?? null);
+      await refreshAppState();
+
+      showMessage('Added to campaign', 'This project was saved into the selected campaign.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <Screen>
       <Card>
-        <Heading>XP Curve Calculator</Heading>
+        <Heading>Progression Planner</Heading>
         <BodyText>
-          Build progression curves for leveling systems across tabletop and digital RPGs.
+          Plan leveling pace, compare advancement styles, and estimate how long a campaign takes to reach key milestones.
         </BodyText>
       </Card>
 
@@ -287,6 +590,117 @@ export default function XpCalculatorScreen() {
       ) : null}
 
       <Card>
+        <Label>Campaign Link</Label>
+
+        {!isPro ? (
+          <View style={styles.proLockedBlock}>
+            <View style={styles.proLockedHeader}>
+              <Label style={styles.proLockedTitle}>★ Pro only</Label>
+              <BodyText style={styles.proLockedText}>
+                Link this progression plan to a Campaign Hub workspace.
+              </BodyText>
+            </View>
+
+            <View style={styles.lockedPillRow}>
+              <View style={[styles.pill, styles.lockedPill]}>
+                <BodyText style={styles.lockedPillText}>none</BodyText>
+              </View>
+              <View style={[styles.pill, styles.lockedPill]}>
+                <BodyText style={styles.lockedPillText}>Campaign Alpha</BodyText>
+              </View>
+              <View style={[styles.pill, styles.lockedPill]}>
+                <BodyText style={styles.lockedPillText}>Boss Arc</BodyText>
+              </View>
+            </View>
+
+            <BodyText style={styles.proLockedHint}>
+              Upgrade to Pro to organize XP, encounters, loot, and quests inside a shared campaign workspace.
+            </BodyText>
+
+            <Pressable onPress={handleUpgradePress} style={styles.inlineUpgradeButton}>
+              <Label style={styles.inlineUpgradeButtonText}>Get Pro</Label>
+            </Pressable>
+          </View>
+        ) : loadingCampaigns ? (
+          <View style={styles.sessionRow}>
+            <ActivityIndicator />
+            <BodyText>Loading campaigns...</BodyText>
+          </View>
+        ) : campaignOptions.length > 0 ? (
+          <View style={styles.pillRow}>
+            <Pressable
+              onPress={() => setSelectedCampaignId('')}
+              style={[styles.pill, selectedCampaignId === '' && styles.pillSelected]}
+            >
+              <BodyText style={selectedCampaignId === '' ? styles.pillTextSelected : undefined}>
+                none
+              </BodyText>
+            </Pressable>
+
+            {campaignOptions.map((campaign) => {
+              const selected = selectedCampaignId === campaign.id;
+
+              return (
+                <Pressable
+                  key={campaign.id}
+                  onPress={() => setSelectedCampaignId(campaign.id)}
+                  style={[styles.pill, selected && styles.pillSelected]}
+                >
+                  <BodyText style={selected ? styles.pillTextSelected : undefined}>
+                    {campaign.name}
+                  </BodyText>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <BodyText>No saved campaigns yet. Create one in Campaign Hub to link this project.</BodyText>
+        )}
+
+        <Label>Progression Preset</Label>
+        <View style={styles.pillRow}>
+          {(['slow', 'standard', 'heroic', 'brutal', 'custom'] as ProgressionPreset[]).map((option) => {
+            const selected = progressionPreset === option;
+
+            return (
+              <Pressable
+                key={option}
+                onPress={() => {
+                  if (option === 'custom') {
+                    setProgressionPreset('custom');
+                    return;
+                  }
+                  applyPreset(option);
+                }}
+                style={[styles.pill, selected && styles.pillSelected]}
+              >
+                <BodyText style={selected ? styles.pillTextSelected : undefined}>
+                  {option}
+                </BodyText>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Label>Progression Mode</Label>
+        <View style={styles.pillRow}>
+          {(['xp', 'milestone'] as ProgressionMode[]).map((option) => {
+            const selected = progressionMode === option;
+
+            return (
+              <Pressable
+                key={option}
+                onPress={() => setProgressionMode(option)}
+                style={[styles.pill, selected && styles.pillSelected]}
+              >
+                <BodyText style={selected ? styles.pillTextSelected : undefined}>
+                  {option}
+                </BodyText>
+              </Pressable>
+            );
+          })}
+        </View>
+
         <Label>Number of Levels</Label>
         <AppInput
           value={levels}
@@ -298,7 +712,10 @@ export default function XpCalculatorScreen() {
         <Label>Base XP</Label>
         <AppInput
           value={baseXp}
-          onChangeText={setBaseXp}
+          onChangeText={(value) => {
+            setProgressionPreset('custom');
+            setBaseXp(value);
+          }}
           keyboardType="numeric"
           placeholder="100"
         />
@@ -306,7 +723,10 @@ export default function XpCalculatorScreen() {
         <Label>Growth Factor</Label>
         <AppInput
           value={growthFactor}
-          onChangeText={setGrowthFactor}
+          onChangeText={(value) => {
+            setProgressionPreset('custom');
+            setGrowthFactor(value);
+          }}
           keyboardType="decimal-pad"
           placeholder="1.3"
         />
@@ -319,7 +739,10 @@ export default function XpCalculatorScreen() {
             return (
               <Pressable
                 key={option}
-                onPress={() => setCurveType(option)}
+                onPress={() => {
+                  setProgressionPreset('custom');
+                  setCurveType(option);
+                }}
                 style={[styles.pill, selected && styles.pillSelected]}
               >
                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
@@ -329,6 +752,30 @@ export default function XpCalculatorScreen() {
             );
           })}
         </View>
+
+        <Label>Encounters per Session</Label>
+        <AppInput
+          value={encountersPerSession}
+          onChangeText={setEncountersPerSession}
+          keyboardType="numeric"
+          placeholder="2"
+        />
+
+        <Label>Expected Encounters per Level</Label>
+        <AppInput
+          value={encountersPerLevel}
+          onChangeText={setEncountersPerLevel}
+          keyboardType="numeric"
+          placeholder="4"
+        />
+
+        <Label>Progression Notes</Label>
+        <AppInput
+          value={progressionNotes}
+          onChangeText={setProgressionNotes}
+          placeholder="Subclass unlock at 3, faction milestone at 6, artifact tier at 10..."
+          multiline
+        />
 
         <View style={styles.saveRow}>
           <View style={styles.actionRow}>
@@ -349,6 +796,23 @@ export default function XpCalculatorScreen() {
             >
               <Label style={styles.secondaryButtonText}>Save As New</Label>
             </Pressable>
+
+            <Pressable
+              onPress={handleSaveToCampaign}
+              disabled={saving || loadingSession || !isPro || !selectedCampaignId}
+              style={[
+                styles.campaignButton,
+                (saving || loadingSession || !isPro || !selectedCampaignId) && styles.saveButtonDisabled,
+              ]}
+            >
+              <Label style={styles.campaignButtonText}>
+                {!isPro
+                  ? 'Add to Campaign'
+                  : currentProjectId && selectedCampaignId
+                    ? 'Update Campaign'
+                    : 'Add to Campaign'}
+              </Label>
+            </Pressable>
           </View>
 
           {loadingSession ? (
@@ -359,28 +823,69 @@ export default function XpCalculatorScreen() {
           ) : sessionUserId ? (
             <BodyText>
               {currentProjectId
-                ? 'Loaded project detected. You can update it or save a new copy.'
+                ? 'Loaded project detected. You can update it, save a new copy, or add it to a campaign.'
                 : 'Signed in. Saving is enabled.'}
             </BodyText>
           ) : (
             <BodyText>Not signed in. You can calculate, but not save yet.</BodyText>
           )}
-          
+
+          {sessionUserId && isCreatingNewProject && isAtFreeLimit ? (
+            <UpgradeBanner
+              title="Free plan limit reached"
+              message="You have used all 3 free saves. Upgrade to Pro to create additional projects."
+              buttonLabel="Upgrade to Pro"
+              onPress={handleUpgradePress}
+            />
+          ) : null}
         </View>
       </Card>
 
       <Card>
-        <Label>Preview</Label>
-        {rows.slice(0, 10).map((row) => (
-          <View key={row.level} style={styles.resultRow}>
-            <BodyText>Level {row.level}</BodyText>
-            <BodyText>Next: {row.xpToNext.toLocaleString()} XP</BodyText>
-            <BodyText>Total: {row.totalXp.toLocaleString()} XP</BodyText>
-          </View>
-        ))}
-        {rows.length > 10 ? (
-          <BodyText>Showing first 10 of {rows.length} levels.</BodyText>
-        ) : null}
+        <Label>Pacing Summary</Label>
+        <View style={styles.resultRow}>
+          <BodyText>{result.pacingAssessment}</BodyText>
+          <BodyText>Estimated total encounters: {result.totalEncounterCount}</BodyText>
+          <BodyText>Estimated sessions to cap: {result.estimatedSessionsToCap}</BodyText>
+        </View>
+      </Card>
+
+      <Card>
+        <Label>Leveling Preview</Label>
+        {progressionMode === 'milestone' ? (
+          <BodyText>Milestone mode is active. Advancement is guided by story beats rather than XP totals.</BodyText>
+        ) : (
+          <>
+            {result.rows.slice(0, 10).map((row) => (
+              <View key={row.level} style={styles.resultRow}>
+                <BodyText>Level {row.level}</BodyText>
+                <BodyText>Next: {row.xpToNext.toLocaleString()} XP</BodyText>
+                <BodyText>Total: {row.totalXp.toLocaleString()} XP</BodyText>
+              </View>
+            ))}
+            {result.rows.length > 10 ? (
+              <BodyText>Showing first 10 of {result.rows.length} levels.</BodyText>
+            ) : null}
+          </>
+        )}
+      </Card>
+
+      <Card>
+        <Label>Milestone Suggestions</Label>
+        <View style={styles.resultRow}>
+          {result.milestoneSuggestions.map((entry, index) => (
+            <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+          ))}
+        </View>
+      </Card>
+
+      <Card>
+        <Label>Practical Advice</Label>
+        <View style={styles.resultRow}>
+          {result.practicalAdvice.map((entry, index) => (
+            <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+          ))}
+        </View>
       </Card>
     </Screen>
   );
@@ -432,10 +937,67 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  campaignButton: {
+    backgroundColor: Colors.elevated,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.accent,
+  },
+  campaignButtonText: {
+    color: Colors.text,
+  },
   saveButtonDisabled: {
     opacity: 0.6,
   },
   saveButtonText: {
+    color: '#fff',
+  },
+  proLockedBlock: {
+    backgroundColor: Colors.elevated,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+    gap: Spacing.sm,
+  },
+  proLockedHeader: {
+    gap: 4,
+  },
+  proLockedTitle: {
+    color: Colors.text,
+  },
+  proLockedText: {
+    color: Colors.text,
+    opacity: 0.85,
+  },
+  lockedPillRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    flexWrap: 'wrap',
+    opacity: 0.55,
+  },
+  lockedPill: {
+    backgroundColor: Colors.elevated,
+  },
+  lockedPillText: {
+    color: Colors.text,
+  },
+  proLockedHint: {
+    color: Colors.text,
+    opacity: 0.8,
+  },
+  inlineUpgradeButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.accent,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  inlineUpgradeButtonText: {
     color: '#fff',
   },
   sessionRow: {
