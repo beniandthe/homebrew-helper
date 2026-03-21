@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-
 import { useAppState } from '@/contexts/AppStateContext';
-import { ProCard } from '@/components/ProCard';
 import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Heading, Label } from '@/components/AppText';
@@ -24,6 +22,13 @@ type CampaignProjectData = {
     campaignSummary?: string;
     currentObjective?: string;
     sessionNotes?: string;
+};
+
+type LinkedProject = {
+    id: string;
+    name: string;
+    tool_type: string;
+    updated_at: string;
 };
 
 function showMessage(title: string, message: string) {
@@ -52,6 +57,9 @@ export default function CampaignScreen() {
     const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
     const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
+
+    const [linkedProjects, setLinkedProjects] = useState<LinkedProject[]>([]);
+    const [loadingLinks, setLoadingLinks] = useState(false);
 
     const {
         userId: sessionUserId,
@@ -96,11 +104,42 @@ export default function CampaignScreen() {
         router.push('/pricing');
     }
 
+    async function loadLinkedProjects(campaignId: string) {
+        if (!supabase || !sessionUserId) return;
+
+        try {
+            setLoadingLinks(true);
+
+            const { data, error } = await supabase
+                .from('saved_projects')
+                .select('id, name, tool_type, updated_at')
+                .eq('user_id', sessionUserId)
+                .eq('campaign_id', campaignId)
+                .order('updated_at', { ascending: false });
+
+            if (error) {
+                showMessage('Linked projects failed', error.message);
+                return;
+            }
+
+            setLinkedProjects((data ?? []) as LinkedProject[]);
+        } finally {
+            setLoadingLinks(false);
+        }
+    }
+
     useEffect(() => {
         async function loadProject() {
             if (!supabase) return;
-            if (!params.projectId) return;
             if (!sessionUserId) return;
+            if (!isPro) return;
+
+            if (!params.projectId) {
+                setLoadedProjectName(null);
+                setCurrentProjectId(null);
+                setLinkedProjects([]);
+                return;
+            }
 
             try {
                 setLoadingProject(true);
@@ -110,6 +149,7 @@ export default function CampaignScreen() {
                     .select('*')
                     .eq('id', params.projectId)
                     .eq('user_id', sessionUserId)
+                    .eq('tool_type', 'campaign_hub')
                     .single();
 
                 if (error) {
@@ -121,6 +161,7 @@ export default function CampaignScreen() {
 
                 if (typeof projectData.campaignName === 'string') setCampaignName(projectData.campaignName);
                 if (typeof projectData.systemName === 'string') setSystemName(projectData.systemName);
+
                 if (
                     projectData.tone === 'heroic' ||
                     projectData.tone === 'grim' ||
@@ -130,6 +171,7 @@ export default function CampaignScreen() {
                 ) {
                     setTone(projectData.tone);
                 }
+
                 if (typeof projectData.levelBand === 'string') setLevelBand(projectData.levelBand);
                 if (typeof projectData.partyName === 'string') setPartyName(projectData.partyName);
                 if (typeof projectData.mainFaction === 'string') setMainFaction(projectData.mainFaction);
@@ -137,15 +179,19 @@ export default function CampaignScreen() {
                 if (typeof projectData.currentObjective === 'string') setCurrentObjective(projectData.currentObjective);
                 if (typeof projectData.sessionNotes === 'string') setSessionNotes(projectData.sessionNotes);
 
-                setLoadedProjectName(data?.name ?? 'Loaded project');
+                setLoadedProjectName(data?.name ?? 'Loaded campaign');
                 setCurrentProjectId(data?.id ?? null);
+
+                if (data?.id) {
+                    await loadLinkedProjects(data.id);
+                }
             } finally {
                 setLoadingProject(false);
             }
         }
 
         loadProject();
-    }, [params.projectId, sessionUserId]);
+    }, [params.projectId, sessionUserId, isPro]);
 
     const campaignSnapshot = useMemo(() => {
         const summary = campaignSummary.trim() || 'No campaign summary written yet.';
@@ -163,6 +209,30 @@ export default function CampaignScreen() {
         };
     }, [campaignSummary, currentObjective, sessionNotes, tone, levelBand, systemName]);
 
+    function openLinkedProject(project: LinkedProject) {
+        if (project.tool_type === 'xp_calculator') {
+            router.push({ pathname: '/xp', params: { projectId: project.id } });
+            return;
+        }
+
+        if (project.tool_type === 'encounter_calculator') {
+            router.push({ pathname: '/encounters', params: { projectId: project.id } });
+            return;
+        }
+
+        if (project.tool_type === 'loot_generator') {
+            router.push({ pathname: '/generator', params: { projectId: project.id } });
+            return;
+        }
+
+        if (project.tool_type === 'quest_generator') {
+            router.push({ pathname: '/quest', params: { projectId: project.id } });
+            return;
+        }
+
+        showMessage('Not supported yet', 'That linked project type cannot be opened yet.');
+    }
+
     async function handleSaveProject(asNew = false) {
         if (!supabase) {
             showMessage('Supabase not configured', 'Add your Supabase URL and anon key in the .env file.');
@@ -170,7 +240,12 @@ export default function CampaignScreen() {
         }
 
         if (!sessionUserId) {
-            showMessage('Sign in required', 'Go to the Account tab and sign in before saving a project.');
+            showMessage('Sign in required', 'Go to the Account tab and sign in before saving a campaign.');
+            return;
+        }
+
+        if (!isPro) {
+            showMessage('Pro required', 'Campaign Hub is a Pro-only workspace.');
             return;
         }
 
@@ -209,6 +284,7 @@ export default function CampaignScreen() {
 
                 setLoadedProjectName(timestampName);
                 await refreshAppState();
+                await loadLinkedProjects(currentProjectId);
                 showMessage('Updated', 'Your campaign hub was updated successfully.');
                 return;
             }
@@ -220,7 +296,7 @@ export default function CampaignScreen() {
                 if (!latestAccess.isPro && latestAccess.count >= maxFreeSaves) {
                     showMessage(
                         'Free limit reached',
-                        'Free accounts can save up to 3 projects total. Upgrade to Pro for unlimited saves.'
+                        'Free accounts can save up to 3 projects total. Upgrade to Pro for unlimited saves and campaign workspaces.'
                     );
                     return;
                 }
@@ -244,6 +320,7 @@ export default function CampaignScreen() {
 
             setLoadedProjectName(data?.name ?? timestampName);
             setCurrentProjectId(data?.id ?? null);
+            setLinkedProjects([]);
             await refreshAppState();
 
             showMessage('Saved', 'Your campaign hub was saved successfully.');
@@ -256,21 +333,43 @@ export default function CampaignScreen() {
         await handleSaveProject(true);
     }
 
+    if (!loadingSession && !isPro) {
+        return (
+            <Screen>
+                <Card>
+                    <Heading>Campaign Hub</Heading>
+                    <BodyText>
+                        Campaign Hub is a Pro workspace for organizing encounters, loot, quests, and progression plans into one campaign.
+                    </BodyText>
+                </Card>
+
+                <UpgradeBanner
+                    title="Campaign Hub is Pro-only"
+                    message="Upgrade to Pro to build campaign workspaces, link saved tool projects, and manage prep in one place."
+                    buttonLabel="Upgrade to Pro"
+                    onPress={handleUpgradePress}
+                />
+
+                <Card>
+                    <Label>What Pro adds here</Label>
+                    <View style={styles.resultRow}>
+                        <BodyText>• Campaign-level notes and objectives</BodyText>
+                        <BodyText>• Linked XP, encounter, loot, and quest projects</BodyText>
+                        <BodyText>• A central workspace for session prep</BodyText>
+                    </View>
+                </Card>
+            </Screen>
+        );
+    }
+
     return (
         <Screen>
             <Card>
                 <Heading>Campaign Hub</Heading>
                 <BodyText>
-                    Organize your campaign identity, party focus, faction pressure, and session prep in one central place.
+                    Organize your campaign identity, party focus, faction pressure, session prep, and linked toolkit projects.
                 </BodyText>
             </Card>
-
-            <ProCard
-                isPro={isPro}
-                savedProjectCount={savedProjectCount}
-                maxFreeSaves={maxFreeSaves}
-                onUpgradePress={handleUpgradePress}
-            />
 
             {loadingProject ? (
                 <Card>
@@ -372,20 +471,11 @@ export default function CampaignScreen() {
                         <BodyText>
                             {currentProjectId
                                 ? 'Loaded campaign detected. You can update it or save a new copy.'
-                                : 'Signed in. Saving is enabled.'}
+                                : 'Signed in. Pro workspace is enabled.'}
                         </BodyText>
                     ) : (
                         <BodyText>Not signed in. You can plan, but not save yet.</BodyText>
                     )}
-
-                    {sessionUserId && isCreatingNewProject && isAtFreeLimit ? (
-                        <UpgradeBanner
-                            title="Free plan limit reached"
-                            message="You have used all 3 free saves. Upgrade to Pro to create additional projects."
-                            buttonLabel="Upgrade to Pro"
-                            onPress={handleUpgradePress}
-                        />
-                    ) : null}
                 </View>
             </Card>
 
@@ -411,6 +501,35 @@ export default function CampaignScreen() {
                 <View style={styles.resultRow}>
                     <BodyText>{campaignSnapshot.notesState}</BodyText>
                 </View>
+            </Card>
+
+            <Card>
+                <Label>Linked Projects</Label>
+                {currentProjectId ? (
+                    loadingLinks ? (
+                        <View style={styles.sessionRow}>
+                            <ActivityIndicator />
+                            <BodyText>Loading linked projects...</BodyText>
+                        </View>
+                    ) : linkedProjects.length > 0 ? (
+                        <View style={styles.resultRow}>
+                            {linkedProjects.map((project) => (
+                                <Pressable
+                                    key={project.id}
+                                    onPress={() => openLinkedProject(project)}
+                                    style={styles.linkedProjectButton}
+                                >
+                                    <Label>{project.name}</Label>
+                                    <BodyText>{project.tool_type}</BodyText>
+                                </Pressable>
+                            ))}
+                        </View>
+                    ) : (
+                        <BodyText>No linked projects yet. Pro tool screens can attach saved projects to this campaign.</BodyText>
+                    )
+                ) : (
+                    <BodyText>Save this campaign first, then you can start linking projects to it.</BodyText>
+                )}
             </Card>
         </Screen>
     );
@@ -480,5 +599,13 @@ const styles = StyleSheet.create({
     },
     resultRow: {
         gap: 8,
+    },
+    linkedProjectButton: {
+        backgroundColor: Colors.elevated,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: Colors.border,
+        padding: 12,
+        gap: 4,
     },
 });

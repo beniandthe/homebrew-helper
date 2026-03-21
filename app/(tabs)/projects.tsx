@@ -17,9 +17,10 @@ type SavedProject = {
   data: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  campaign_id?: string | null;
 };
 
-type ProjectFilter = 'all' | 'campaign' | 'xp' | 'encounter' | 'loot' | 'quest';
+type ProjectFilter = 'all' | 'xp' | 'encounter' | 'loot' | 'quest';
 
 function showMessage(title: string, message: string) {
   if (Platform.OS === 'web') {
@@ -73,7 +74,6 @@ export default function ProjectsScreen() {
     }
 
     const toolTypeMap: Record<Exclude<ProjectFilter, 'all'>, string> = {
-      campaign: 'campaign_hub',
       xp: 'xp_calculator',
       encounter: 'encounter_calculator',
       loot: 'loot_generator',
@@ -96,6 +96,7 @@ export default function ProjectsScreen() {
         .from('saved_projects')
         .select('*')
         .eq('user_id', userId)
+        .is('campaign_id', null)
         .order('updated_at', { ascending: false });
 
       if (error) {
@@ -348,11 +349,12 @@ export default function ProjectsScreen() {
                       </View>
                     </View>
                   ) : (
-                    <>
-                      <Label>{item.name}</Label>
-                      <BodyText>{item.tool_type}</BodyText>
-                      <BodyText>Updated: {formatDate(item.updated_at)}</BodyText>
-                    </>
+                      <>
+                        <Label>{item.name}</Label>
+                        <BodyText>{item.tool_type}</BodyText>
+                        {item.campaign_id ? <BodyText>Linked to campaign</BodyText> : null}
+                        <BodyText>Updated: {formatDate(item.updated_at)}</BodyText>
+                      </>
                   )}
                 </Pressable>
 

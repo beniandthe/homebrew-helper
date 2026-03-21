@@ -28,6 +28,11 @@ type XpProjectData = {
   progressionNotes?: string;
 };
 
+type CampaignOption = {
+  id: string;
+  name: string;
+};
+
 function showMessage(title: string, message: string) {
   if (Platform.OS === 'web') {
     window.alert(`${title}\n\n${message}`);
@@ -68,6 +73,10 @@ export default function XpCalculatorScreen() {
   const maxFreeSaves = 3;
   const isAtFreeLimit = !isPro && savedProjectCount >= maxFreeSaves;
   const isCreatingNewProject = !currentProjectId;
+
+  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
 
   function applyPreset(preset: ProgressionPreset) {
     setProgressionPreset(preset);
@@ -136,11 +145,56 @@ export default function XpCalculatorScreen() {
     router.push('/pricing');
   }
 
+  async function loadCampaignOptions() {
+    if (!supabase || !sessionUserId) return;
+
+    try {
+      setLoadingCampaigns(true);
+
+      const { data, error } = await supabase
+        .from('saved_projects')
+        .select('id, name')
+        .eq('user_id', sessionUserId)
+        .eq('tool_type', 'campaign_hub')
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        showMessage('Campaign load failed', error.message);
+        return;
+      }
+
+      setCampaignOptions((data ?? []) as CampaignOption[]);
+    } finally {
+      setLoadingCampaigns(false);
+    }
+  }
+
+  useEffect(() => {
+    if (isPro) {
+      loadCampaignOptions();
+    } else {
+      setCampaignOptions([]);
+      setLoadingCampaigns(false);
+    }
+  }, [sessionUserId, currentProjectId, isPro]);
+
+  useEffect(() => {
+    if (!isPro) {
+      setSelectedCampaignId('');
+    }
+  }, [isPro]);
+
   useEffect(() => {
     async function loadProject() {
       if (!supabase) return;
-      if (!params.projectId) return;
       if (!sessionUserId) return;
+
+      if (!params.projectId) {
+        setLoadedProjectName(null);
+        setCurrentProjectId(null);
+        setSelectedCampaignId('');
+        return;
+      }
 
       try {
         setLoadingProject(true);
@@ -158,6 +212,12 @@ export default function XpCalculatorScreen() {
         }
 
         const projectData = (data?.data ?? {}) as XpProjectData;
+
+        if (typeof data?.campaign_id === 'string' && isPro) {
+          setSelectedCampaignId(data.campaign_id);
+        } else {
+          setSelectedCampaignId('');
+        }
 
         if (typeof projectData.levels === 'number') {
           setLevels(String(projectData.levels));
@@ -213,7 +273,7 @@ export default function XpCalculatorScreen() {
     }
 
     loadProject();
-  }, [params.projectId, sessionUserId]);
+  }, [params.projectId, sessionUserId, isPro]);
 
   const result = useMemo(() => {
     const parsedLevels = Math.max(1, Number.parseInt(levels || '1', 10));
@@ -310,6 +370,23 @@ export default function XpCalculatorScreen() {
     encountersPerLevel,
   ]);
 
+  function buildPayload() {
+    return {
+      levels: Number.parseInt(levels || '1', 10),
+      baseXp: Number.parseInt(baseXp || '1', 10),
+      growthFactor: Number.parseFloat(growthFactor || '1'),
+      curveType,
+      progressionPreset,
+      progressionMode,
+      encountersPerSession: Number.parseInt(encountersPerSession || '1', 10),
+      encountersPerLevel: Number.parseInt(encountersPerLevel || '1', 10),
+      progressionNotes,
+      result,
+    };
+  }
+
+  
+
   async function handleSaveProject(asNew = false) {
     if (!supabase) {
       showMessage('Supabase not configured', 'Add your Supabase URL and anon key in the .env file.');
@@ -324,19 +401,7 @@ export default function XpCalculatorScreen() {
     try {
       setSaving(true);
 
-      const payload = {
-        levels: Number.parseInt(levels || '1', 10),
-        baseXp: Number.parseInt(baseXp || '1', 10),
-        growthFactor: Number.parseFloat(growthFactor || '1'),
-        curveType,
-        progressionPreset,
-        progressionMode,
-        encountersPerSession: Number.parseInt(encountersPerSession || '1', 10),
-        encountersPerLevel: Number.parseInt(encountersPerLevel || '1', 10),
-        progressionNotes,
-        result,
-      };
-
+      const payload = buildPayload();
       const timestampName = `XP Planner - ${new Date().toLocaleString()}`;
 
       if (!asNew && currentProjectId) {
@@ -346,6 +411,7 @@ export default function XpCalculatorScreen() {
             name: loadedProjectName ?? timestampName,
             data: payload,
             updated_at: new Date().toISOString(),
+            campaign_id: null,
           })
           .eq('id', currentProjectId)
           .eq('user_id', sessionUserId);
@@ -356,6 +422,7 @@ export default function XpCalculatorScreen() {
         }
 
         await refreshAppState();
+        setSelectedCampaignId('');
         showMessage('Updated', 'Your progression project was updated successfully.');
         return;
       }
@@ -380,6 +447,7 @@ export default function XpCalculatorScreen() {
           name: timestampName,
           tool_type: 'xp_calculator',
           data: payload,
+          campaign_id: null,
         })
         .select()
         .single();
@@ -391,6 +459,7 @@ export default function XpCalculatorScreen() {
 
       setLoadedProjectName(data?.name ?? timestampName);
       setCurrentProjectId(data?.id ?? null);
+      setSelectedCampaignId('');
       await refreshAppState();
 
       showMessage('Saved', 'Your progression project was saved successfully.');
@@ -401,6 +470,92 @@ export default function XpCalculatorScreen() {
 
   async function handleSaveAsNew() {
     await handleSaveProject(true);
+  }
+
+  async function handleSaveToCampaign() {
+    if (!supabase) {
+      showMessage('Supabase not configured', 'Add your Supabase URL and anon key in the .env file.');
+      return;
+    }
+
+    if (!sessionUserId) {
+      showMessage('Sign in required', 'Go to the Account tab and sign in before saving to a campaign.');
+      return;
+    }
+
+    if (!isPro) {
+      showMessage('Pro required', 'Campaign workspaces are available on Pro.');
+      return;
+    }
+
+    if (!selectedCampaignId) {
+      showMessage('Select a campaign', 'Choose a campaign before adding this project.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      const payload = buildPayload();
+      const timestampName = loadedProjectName ?? `XP Planner - ${new Date().toLocaleString()}`;
+
+      if (currentProjectId) {
+        const { error } = await supabase
+          .from('saved_projects')
+          .update({
+            name: timestampName,
+            data: payload,
+            updated_at: new Date().toISOString(),
+            campaign_id: selectedCampaignId,
+          })
+          .eq('id', currentProjectId)
+          .eq('user_id', sessionUserId);
+
+        if (error) {
+          showMessage('Campaign update failed', error.message);
+          return;
+        }
+
+        await refreshAppState();
+        showMessage('Campaign updated', 'This project is now linked to the selected campaign.');
+        return;
+      }
+
+      const latestAccess = await getLatestSaveAccess(sessionUserId);
+
+      if (!latestAccess.isPro && latestAccess.count >= maxFreeSaves) {
+        showMessage(
+          'Free limit reached',
+          'Free accounts can save up to 3 projects total. Upgrade to Pro for unlimited saves.'
+        );
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('saved_projects')
+        .insert({
+          user_id: sessionUserId,
+          name: timestampName,
+          tool_type: 'xp_calculator',
+          data: payload,
+          campaign_id: selectedCampaignId,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        showMessage('Campaign save failed', error.message);
+        return;
+      }
+
+      setLoadedProjectName(data?.name ?? timestampName);
+      setCurrentProjectId(data?.id ?? null);
+      await refreshAppState();
+
+      showMessage('Added to campaign', 'This project was saved into the selected campaign.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -435,6 +590,73 @@ export default function XpCalculatorScreen() {
       ) : null}
 
       <Card>
+        <Label>Campaign Link</Label>
+
+        {!isPro ? (
+          <View style={styles.proLockedBlock}>
+            <View style={styles.proLockedHeader}>
+              <Label style={styles.proLockedTitle}>★ Pro only</Label>
+              <BodyText style={styles.proLockedText}>
+                Link this progression plan to a Campaign Hub workspace.
+              </BodyText>
+            </View>
+
+            <View style={styles.lockedPillRow}>
+              <View style={[styles.pill, styles.lockedPill]}>
+                <BodyText style={styles.lockedPillText}>none</BodyText>
+              </View>
+              <View style={[styles.pill, styles.lockedPill]}>
+                <BodyText style={styles.lockedPillText}>Campaign Alpha</BodyText>
+              </View>
+              <View style={[styles.pill, styles.lockedPill]}>
+                <BodyText style={styles.lockedPillText}>Boss Arc</BodyText>
+              </View>
+            </View>
+
+            <BodyText style={styles.proLockedHint}>
+              Upgrade to Pro to organize XP, encounters, loot, and quests inside a shared campaign workspace.
+            </BodyText>
+
+            <Pressable onPress={handleUpgradePress} style={styles.inlineUpgradeButton}>
+              <Label style={styles.inlineUpgradeButtonText}>Get Pro</Label>
+            </Pressable>
+          </View>
+        ) : loadingCampaigns ? (
+          <View style={styles.sessionRow}>
+            <ActivityIndicator />
+            <BodyText>Loading campaigns...</BodyText>
+          </View>
+        ) : campaignOptions.length > 0 ? (
+          <View style={styles.pillRow}>
+            <Pressable
+              onPress={() => setSelectedCampaignId('')}
+              style={[styles.pill, selectedCampaignId === '' && styles.pillSelected]}
+            >
+              <BodyText style={selectedCampaignId === '' ? styles.pillTextSelected : undefined}>
+                none
+              </BodyText>
+            </Pressable>
+
+            {campaignOptions.map((campaign) => {
+              const selected = selectedCampaignId === campaign.id;
+
+              return (
+                <Pressable
+                  key={campaign.id}
+                  onPress={() => setSelectedCampaignId(campaign.id)}
+                  style={[styles.pill, selected && styles.pillSelected]}
+                >
+                  <BodyText style={selected ? styles.pillTextSelected : undefined}>
+                    {campaign.name}
+                  </BodyText>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <BodyText>No saved campaigns yet. Create one in Campaign Hub to link this project.</BodyText>
+        )}
+
         <Label>Progression Preset</Label>
         <View style={styles.pillRow}>
           {(['slow', 'standard', 'heroic', 'brutal', 'custom'] as ProgressionPreset[]).map((option) => {
@@ -574,6 +796,23 @@ export default function XpCalculatorScreen() {
             >
               <Label style={styles.secondaryButtonText}>Save As New</Label>
             </Pressable>
+
+            <Pressable
+              onPress={handleSaveToCampaign}
+              disabled={saving || loadingSession || !isPro || !selectedCampaignId}
+              style={[
+                styles.campaignButton,
+                (saving || loadingSession || !isPro || !selectedCampaignId) && styles.saveButtonDisabled,
+              ]}
+            >
+              <Label style={styles.campaignButtonText}>
+                {!isPro
+                  ? 'Add to Campaign'
+                  : currentProjectId && selectedCampaignId
+                    ? 'Update Campaign'
+                    : 'Add to Campaign'}
+              </Label>
+            </Pressable>
           </View>
 
           {loadingSession ? (
@@ -584,7 +823,7 @@ export default function XpCalculatorScreen() {
           ) : sessionUserId ? (
             <BodyText>
               {currentProjectId
-                ? 'Loaded project detected. You can update it or save a new copy.'
+                ? 'Loaded project detected. You can update it, save a new copy, or add it to a campaign.'
                 : 'Signed in. Saving is enabled.'}
             </BodyText>
           ) : (
@@ -698,10 +937,67 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  campaignButton: {
+    backgroundColor: Colors.elevated,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.accent,
+  },
+  campaignButtonText: {
+    color: Colors.text,
+  },
   saveButtonDisabled: {
     opacity: 0.6,
   },
   saveButtonText: {
+    color: '#fff',
+  },
+  proLockedBlock: {
+    backgroundColor: Colors.elevated,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+    gap: Spacing.sm,
+  },
+  proLockedHeader: {
+    gap: 4,
+  },
+  proLockedTitle: {
+    color: Colors.text,
+  },
+  proLockedText: {
+    color: Colors.text,
+    opacity: 0.85,
+  },
+  lockedPillRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    flexWrap: 'wrap',
+    opacity: 0.55,
+  },
+  lockedPill: {
+    backgroundColor: Colors.elevated,
+  },
+  lockedPillText: {
+    color: Colors.text,
+  },
+  proLockedHint: {
+    color: Colors.text,
+    opacity: 0.8,
+  },
+  inlineUpgradeButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.accent,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  inlineUpgradeButtonText: {
     color: '#fff',
   },
   sessionRow: {

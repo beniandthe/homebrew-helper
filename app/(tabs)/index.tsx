@@ -112,11 +112,6 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        <View style={styles.sectionHeader}>
-          <Heading style={styles.sectionTitle}>Campaign Management</Heading>
-          <BodyText>Keep your creations organized as your world grows.</BodyText>
-        </View>
-
         <Pressable onPress={() => goTo('/projects')}>
           <Card>
             <Label>My Projects</Label>
