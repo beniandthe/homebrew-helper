@@ -6,6 +6,7 @@ node_modules/
 .expo-shared/
 dist/
 web-build/
+expo-env.d.ts
 
 # local env
 .env
