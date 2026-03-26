@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useAppState } from '@/contexts/AppStateContext';
 import { BodyText, Heading, Label } from '@/components/AppText';
 import { Card } from '@/components/Card';
@@ -17,25 +17,167 @@ function showMessage(title: string, message: string) {
     Alert.alert(title, message);
 }
 
+function formatPlanDate(value: string | null) {
+    if (!value) return null;
+
+    try {
+        return new Date(value).toLocaleDateString(undefined, {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+        });
+    } catch {
+        return value;
+    }
+}
+
 export default function PricingScreen() {
     const [busy, setBusy] = useState(false);
+    const [loadingBillingState, setLoadingBillingState] = useState(false);
+    const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false);
+    const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null);
+    const [canceledAt, setCanceledAt] = useState<string | null>(null);
+
+    const params = useLocalSearchParams<{ checkout?: string }>();
     const { loading, isPro, isSignedIn, userId, refreshAppState } = useAppState();
 
+    async function loadBillingState(nextUserId: string) {
+        if (!supabase) return;
 
-    function handleUpgradePress() {
-        if (isPro) {
+        try {
+            setLoadingBillingState(true);
+
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('cancel_at_period_end, current_period_end, canceled_at')
+                .eq('id', nextUserId)
+                .maybeSingle();
+
+            if (error) {
+                showMessage('Plan load failed', error.message);
+                return;
+            }
+
+            setCancelAtPeriodEnd(Boolean(data?.cancel_at_period_end));
+            setCurrentPeriodEnd(data?.current_period_end ?? null);
+            setCanceledAt(data?.canceled_at ?? null);
+        } finally {
+            setLoadingBillingState(false);
+        }
+    }
+
+    useEffect(() => {
+        if (!userId || !isSignedIn) {
+            setCancelAtPeriodEnd(false);
+            setCurrentPeriodEnd(null);
+            setCanceledAt(null);
+            return;
+        }
+
+        loadBillingState(userId);
+    }, [userId, isSignedIn, isPro]);
+
+    useEffect(() => {
+        if (params.checkout === 'success') {
+            refreshAppState();
+            if (userId) {
+                loadBillingState(userId);
+            }
+        }
+    }, [params.checkout, refreshAppState, userId]);
+
+    async function handleUpgradePress() {
+        if (!supabase) {
+            showMessage('Supabase not configured', 'Missing Supabase configuration.');
+            return;
+        }
+
+        if (!isSignedIn || !userId) {
+            showMessage('Sign in required', 'Please sign in before upgrading to Pro.');
+            return;
+        }
+
+        if (isPro && !cancelAtPeriodEnd) {
             showMessage('Pro already active', 'Your account already has Pro enabled.');
             return;
         }
 
-        router.push('/checkout');
+        try {
+            setBusy(true);
+
+            const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+                body: {},
+            });
+
+            if (error) {
+                showMessage('Checkout failed', error.message);
+                return;
+            }
+
+            if (!data?.url) {
+                showMessage('Checkout failed', 'No checkout URL was returned.');
+                return;
+            }
+
+            if (Platform.OS === 'web') {
+                window.location.href = data.url;
+                return;
+            }
+
+            showMessage(
+                'Web checkout required',
+                'Stripe checkout is currently set up for web only.'
+            );
+        } finally {
+            setBusy(false);
+        }
     }
 
-    function handleRestorePress() {
-        showMessage(
-            'Restore not wired yet',
-            'This button will later restore a prior Pro purchase or refresh account access.'
-        );
+    async function handleManageSubscriptionPress() {
+        if (!supabase) {
+            showMessage('Supabase not configured', 'Missing Supabase configuration.');
+            return;
+        }
+
+        if (!isSignedIn || !userId) {
+            showMessage('Sign in required', 'Please sign in before managing your subscription.');
+            return;
+        }
+
+        if (!isPro) {
+            showMessage('No active Pro plan', 'Upgrade to Pro before managing a subscription.');
+            return;
+        }
+
+        try {
+            setBusy(true);
+
+            const { data, error } = await supabase.functions.invoke('create-customer-portal-session', {
+                body: {},
+            });
+
+            if (error) {
+                showMessage('Portal failed', error.message);
+                return;
+            }
+
+            if (!data?.url) {
+                showMessage('Portal failed', 'No portal URL was returned.');
+                return;
+            }
+
+            if (Platform.OS === 'web') {
+                window.location.href = data.url;
+                return;
+            }
+
+            showMessage(
+                'Web portal required',
+                'Subscription management is currently set up for web only.'
+            );
+        } finally {
+            setBusy(false);
+        }
     }
 
     async function handleDisableProDev() {
@@ -62,7 +204,9 @@ export default function PricingScreen() {
         try {
             setBusy(true);
 
-            const { error } = await supabase.rpc('downgrade_to_free_and_trim_projects');
+            const { error } = await supabase.rpc('downgrade_to_free_and_trim_projects', {
+                target_user_id: userId,
+            });
 
             if (error) {
                 showMessage('Downgrade failed', error.message);
@@ -70,6 +214,10 @@ export default function PricingScreen() {
             }
 
             await refreshAppState();
+            setCancelAtPeriodEnd(false);
+            setCurrentPeriodEnd(null);
+            setCanceledAt(null);
+
             showMessage(
                 'Pro disabled',
                 'Dev Pro access has been removed. Campaigns, linked campaign projects, and extra standalone projects beyond the free limit were deleted.'
@@ -77,7 +225,30 @@ export default function PricingScreen() {
         } finally {
             setBusy(false);
         }
-      }
+    }
+
+    const formattedPeriodEnd = formatPlanDate(currentPeriodEnd);
+    const formattedCanceledAt = formatPlanDate(canceledAt);
+
+    function renderPlanText() {
+        if (!isSignedIn) {
+            return 'Not signed in. Sign in to view and manage your plan.';
+        }
+
+        if (loadingBillingState || loading) {
+            return 'Loading plan...';
+        }
+
+        if (isPro && cancelAtPeriodEnd && formattedPeriodEnd) {
+            return `Pro has been canceled and remains active until ${formattedPeriodEnd}.`;
+        }
+
+        if (isPro) {
+            return 'Pro is active and renews automatically.';
+        }
+
+        return 'Free plan active. You can save up to 3 total projects.';
+    }
 
     return (
         <Screen>
@@ -91,43 +262,49 @@ export default function PricingScreen() {
 
                 <Card>
                     <Label>Current Plan</Label>
-                    {loading ? (
+                    {loading || loadingBillingState ? (
                         <View style={styles.row}>
                             <ActivityIndicator />
                             <BodyText>Loading plan...</BodyText>
                         </View>
-                    ) : !isSignedIn ? (
-                        <BodyText>Not signed in. Sign in to view and manage your plan.</BodyText>
-                    ) : isPro ? (
-                        <BodyText>Pro is active on this account.</BodyText>
                     ) : (
-                        <BodyText>Free plan active. You can save up to 3 total projects.</BodyText>
+                        <BodyText>{renderPlanText()}</BodyText>
                     )}
+
+                    {isPro && cancelAtPeriodEnd && formattedCanceledAt ? (
+                        <BodyText style={styles.subtleText}>
+                            Cancellation was requested on {formattedCanceledAt}.
+                        </BodyText>
+                    ) : null}
                 </Card>
 
                 <Card>
                     <Label>Manage Subscription</Label>
+
                     {!isSignedIn ? (
                         <BodyText>Sign in first to manage billing and account access.</BodyText>
                     ) : isPro ? (
                         <>
                             <BodyText>
-                                You currently have Pro access. When real billing is wired, this section will let you
-                                manage renewal, billing, and restoration.
+                                {cancelAtPeriodEnd && formattedPeriodEnd
+                                    ? `Your subscription is set to end on ${formattedPeriodEnd}. You can still manage billing and payment details through Stripe until then.`
+                                    : 'You currently have Pro access. Manage billing, payment method, and cancellation through Stripe.'}
                             </BodyText>
 
                             <Pressable
-                                style={[styles.secondaryButton, busy && styles.buttonDisabled]}
-                                onPress={handleRestorePress}
-                                disabled={busy}
+                                style={[styles.secondaryButton, (busy || loading || loadingBillingState) && styles.buttonDisabled]}
+                                onPress={handleManageSubscriptionPress}
+                                disabled={busy || loading || loadingBillingState}
                             >
-                                <Label style={styles.secondaryButtonText}>Restore Access</Label>
+                                <Label style={styles.secondaryButtonText}>
+                                    {busy ? 'Opening...' : 'Manage Subscription'}
+                                </Label>
                             </Pressable>
 
                             <Pressable
-                                style={[styles.dangerButton, busy && styles.buttonDisabled]}
+                                style={[styles.dangerButton, (busy || loading || loadingBillingState) && styles.buttonDisabled]}
                                 onPress={handleDisableProDev}
-                                disabled={busy}
+                                disabled={busy || loading || loadingBillingState}
                             >
                                 <Label style={styles.primaryButtonText}>
                                     {busy ? 'Working...' : 'Disable Pro (Dev Only)'}
@@ -137,15 +314,17 @@ export default function PricingScreen() {
                     ) : (
                         <>
                             <BodyText>
-                                Upgrade to Pro to unlock unlimited saved projects and future premium features.
+                                Upgrade to Pro to unlock unlimited saved projects and Campaign Hub organization.
                             </BodyText>
 
-                            <Pressable style={styles.primaryButton} onPress={handleUpgradePress}>
-                                <Label style={styles.primaryButtonText}>Upgrade to Pro</Label>
-                            </Pressable>
-
-                            <Pressable style={styles.secondaryButton} onPress={handleRestorePress}>
-                                <Label style={styles.secondaryButtonText}>Restore Access</Label>
+                            <Pressable
+                                style={[styles.primaryButton, (busy || loading || loadingBillingState) && styles.buttonDisabled]}
+                                onPress={handleUpgradePress}
+                                disabled={busy || loading || loadingBillingState}
+                            >
+                                <Label style={styles.primaryButtonText}>
+                                    {busy ? 'Opening...' : 'Upgrade to Pro'}
+                                </Label>
                             </Pressable>
                         </>
                     )}
@@ -172,18 +351,18 @@ export default function PricingScreen() {
 
                         <View style={styles.featureList}>
                             <BodyText>• Unlimited saved projects</BodyText>
-                            <BodyText>• Best for campaign building</BodyText>
+                            <BodyText>• Campaign Hub access</BodyText>
+                            <BodyText>• Linked campaign workflows</BodyText>
                             <BodyText>• Future premium features</BodyText>
-                            <BodyText>• Future export and advanced tools</BodyText>
                         </View>
                     </Card>
                 </View>
 
                 <Card>
-                    <Label>Planned Pricing</Label>
+                    <Label>Current Pricing</Label>
                     <Heading>$4.99 / month</Heading>
                     <BodyText>
-                        This is a placeholder price while billing is still being wired. You can adjust it later.
+                        Monthly Pro unlocks unlimited saves and Campaign Hub organization.
                     </BodyText>
                 </Card>
 
@@ -210,6 +389,10 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: Spacing.sm,
+    },
+    subtleText: {
+        marginTop: Spacing.sm,
+        opacity: 0.75,
     },
     planGrid: {
         gap: Spacing.md,

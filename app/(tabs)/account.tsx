@@ -9,6 +9,20 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 
+function formatPlanDate(value: string | null) {
+  if (!value) return null;
+
+  try {
+    return new Date(value).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch {
+    return value;
+  }
+}
+
 export default function AccountScreen() {
   const configured = Boolean(supabase);
 
@@ -21,6 +35,8 @@ export default function AccountScreen() {
   const [message, setMessage] = useState('');
 
   const [isPro, setIsPro] = useState(false);
+  const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false);
+  const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null);
   const [loadingPlan, setLoadingPlan] = useState(false);
 
   const userEmail = useMemo(() => session?.user?.email ?? '', [session]);
@@ -35,7 +51,7 @@ export default function AccountScreen() {
 
       const { data, error } = await supabase
         .from('profiles')
-        .select('is_pro')
+        .select('is_pro, cancel_at_period_end, current_period_end')
         .eq('id', nextUserId)
         .maybeSingle();
 
@@ -45,6 +61,8 @@ export default function AccountScreen() {
       }
 
       setIsPro(Boolean(data?.is_pro));
+      setCancelAtPeriodEnd(Boolean(data?.cancel_at_period_end));
+      setCurrentPeriodEnd(data?.current_period_end ?? null);
     } finally {
       setLoadingPlan(false);
     }
@@ -73,6 +91,8 @@ export default function AccountScreen() {
         await loadPlan(nextSession.user.id);
       } else {
         setIsPro(false);
+        setCancelAtPeriodEnd(false);
+        setCurrentPeriodEnd(null);
       }
     });
 
@@ -85,6 +105,8 @@ export default function AccountScreen() {
         await loadPlan(nextSession.user.id);
       } else {
         setIsPro(false);
+        setCancelAtPeriodEnd(false);
+        setCurrentPeriodEnd(null);
       }
     });
 
@@ -182,6 +204,8 @@ export default function AccountScreen() {
         .upsert({
           id: userId,
           is_pro: nextValue,
+          cancel_at_period_end: false,
+          current_period_end: null,
         });
 
       if (error) {
@@ -190,10 +214,29 @@ export default function AccountScreen() {
       }
 
       await refreshAppState();
+      await loadPlan(userId);
       setMessage(nextValue ? 'Pro test mode enabled.' : 'Pro test mode disabled.');
     } finally {
       setBusy(false);
     }
+  }
+
+  const formattedPeriodEnd = formatPlanDate(currentPeriodEnd);
+
+  function renderPlanSummary() {
+    if (loadingPlan) {
+      return 'Loading plan...';
+    }
+
+    if (isPro && cancelAtPeriodEnd && formattedPeriodEnd) {
+      return `Plan: Pro (canceled, active until ${formattedPeriodEnd})`;
+    }
+
+    if (isPro) {
+      return 'Plan: Pro';
+    }
+
+    return 'Plan: Free';
   }
 
   return (
@@ -232,7 +275,14 @@ export default function AccountScreen() {
                 <BodyText>Loading plan...</BodyText>
               </View>
             ) : (
-              <BodyText>{isPro ? 'Pro plan active.' : 'Free plan active.'}</BodyText>
+              <>
+                <BodyText>{renderPlanSummary()}</BodyText>
+                {isPro && cancelAtPeriodEnd && formattedPeriodEnd ? (
+                  <BodyText style={styles.subtleText}>
+                    Subscription access remains active until {formattedPeriodEnd}.
+                  </BodyText>
+                ) : null}
+              </>
             )}
 
             <Pressable
@@ -262,49 +312,50 @@ export default function AccountScreen() {
               <Label style={styles.buttonText}>Sign Out</Label>
             </Pressable>
 
-            {message ? <BodyText>{message}</BodyText> : null}
+            {message ? <BodyText style={styles.message}>{message}</BodyText> : null}
           </Card>
         </>
       ) : (
-        <Card>
-          <Label>Email</Label>
-          <AppInput
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="email-address"
-            placeholder="you@example.com"
-          />
+        <>
+          <Card>
+            <Label>Email</Label>
+            <AppInput
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@example.com"
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
 
-          <Label>Password</Label>
-          <AppInput
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            placeholder="Minimum 6 characters"
-          />
+            <Label>Password</Label>
+            <AppInput
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Password"
+              secureTextEntry
+            />
 
-          <View style={styles.buttonRow}>
-            <Pressable
-              style={[styles.button, busy && styles.buttonDisabled]}
-              onPress={handleSignUp}
-              disabled={busy || !configured}
-            >
-              <Label style={styles.buttonText}>{busy ? 'Working...' : 'Sign Up'}</Label>
-            </Pressable>
+            <View style={styles.actionRow}>
+              <Pressable
+                style={[styles.button, busy && styles.buttonDisabled]}
+                onPress={handleSignIn}
+                disabled={busy}
+              >
+                <Label style={styles.buttonText}>{busy ? 'Working...' : 'Sign In'}</Label>
+              </Pressable>
 
-            <Pressable
-              style={[styles.buttonSecondary, busy && styles.buttonDisabled]}
-              onPress={handleSignIn}
-              disabled={busy || !configured}
-            >
-              <Label style={styles.buttonText}>Sign In</Label>
-            </Pressable>
-          </View>
+              <Pressable
+                style={[styles.buttonSecondary, busy && styles.buttonDisabled]}
+                onPress={handleSignUp}
+                disabled={busy}
+              >
+                <Label style={styles.buttonText}>Sign Up</Label>
+              </Pressable>
+            </View>
 
-          {message ? <BodyText>{message}</BodyText> : null}
-        </Card>
+            {message ? <BodyText style={styles.message}>{message}</BodyText> : null}
+          </Card>
+        </>
       )}
     </Screen>
   );
@@ -316,10 +367,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
   },
-  buttonRow: {
+  actionRow: {
     flexDirection: 'row',
     gap: Spacing.sm,
     flexWrap: 'wrap',
+    marginTop: Spacing.sm,
   },
   button: {
     backgroundColor: Colors.accent,
@@ -328,7 +380,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 160,
   },
   buttonSecondary: {
     backgroundColor: Colors.elevated,
@@ -337,14 +388,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 120,
     borderWidth: 1,
     borderColor: Colors.border,
+    marginTop: Spacing.sm,
+  },
+  buttonText: {
+    color: '#fff',
   },
   buttonDisabled: {
     opacity: 0.6,
   },
-  buttonText: {
-    color: '#fff',
+  message: {
+    marginTop: Spacing.sm,
+  },
+  subtleText: {
+    marginTop: Spacing.sm,
+    opacity: 0.75,
   },
 });
