@@ -38,6 +38,29 @@ A lightweight Expo + Expo Router starter for a cross-platform RPG utility app th
    npm run ios
    ```
 
+## Security and repository hygiene
+
+- `.gitignore` now blocks common secrets and signing artifacts (`.env.*`, certificates, private keys, provisioning profiles, temp/cache folders).
+- Keep secrets in environment variables only; do not commit `.env` files.
+- If you rotate credentials, update your GitHub secrets and Expo secrets immediately.
+
+## CI/CD pipelines
+
+GitHub Actions workflows are included:
+
+- **CI (`.github/workflows/ci.yml`)**
+  - Runs on pull requests and pushes to `main`.
+  - Installs dependencies and runs lint/typecheck checks.
+- **CD (`.github/workflows/cd-publish.yml`)**
+  - Runs when a GitHub Release is published (or manually via `workflow_dispatch`).
+  - Re-runs quality checks and publishes an EAS OTA update.
+
+### Required GitHub secret for CD
+
+Set this repository secret before using the publish workflow:
+
+- `EXPO_TOKEN`: Expo access token with permission to publish updates.
+
 ## Suggested next implementation steps
 
 ### 1) Save projects
