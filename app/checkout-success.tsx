@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 import { useAppState } from '@/contexts/AppStateContext';
 
 export default function CheckoutSuccessScreen() {
+    const enableDevBilling = process.env.EXPO_PUBLIC_ENABLE_DEV_BILLING === 'true';
     const [loading, setLoading] = useState(true);
     const [completed, setCompleted] = useState(false);
     const [message, setMessage] = useState('Applying Pro access...');
@@ -17,6 +18,12 @@ export default function CheckoutSuccessScreen() {
 
     useEffect(() => {
         async function applyFakePurchase() {
+            if (!enableDevBilling) {
+                setMessage('This dev-only screen is disabled.');
+                setLoading(false);
+                return;
+            }
+
             if (!supabase) {
                 setMessage('Supabase is not configured.');
                 setLoading(false);
@@ -49,13 +56,13 @@ export default function CheckoutSuccessScreen() {
                         id: userId,
                         is_pro: true,
                     });
-                
+
                 if (error) {
                     setMessage(error.message);
                     setLoading(false);
                     return;
                 }
-                
+
                 await refreshAppState();
                 setCompleted(true);
                 setMessage('Pro test purchase applied successfully.');
@@ -65,15 +72,16 @@ export default function CheckoutSuccessScreen() {
         }
 
         applyFakePurchase();
-    }, []);
+    }, [enableDevBilling, refreshAppState]);
 
     return (
         <Screen>
             <Card>
                 <Heading>Upgrade Complete</Heading>
                 <BodyText>
-                    This is the dev purchase-success flow. It marks your account as Pro so you can test the
-                    full upgrade experience before real billing is connected.
+                    {enableDevBilling
+                        ? 'This is the dev purchase-success flow. It marks your account as Pro so you can test the full upgrade experience before real billing is connected.'
+                        : 'This dev-only screen is disabled now that real billing is connected.'}
                 </BodyText>
             </Card>
 
@@ -89,7 +97,7 @@ export default function CheckoutSuccessScreen() {
                     <BodyText>{message}</BodyText>
                 )}
 
-                {completed ? (
+                {enableDevBilling && completed ? (
                     <>
                         <BodyText>• Pro access should now be active on this account</BodyText>
                         <BodyText>• Tool screens will refresh when you revisit them</BodyText>

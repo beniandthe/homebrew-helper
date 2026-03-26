@@ -38,6 +38,7 @@ export default function PricingScreen() {
     const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null);
     const [canceledAt, setCanceledAt] = useState<string | null>(null);
 
+    const enableDevBilling = process.env.EXPO_PUBLIC_ENABLE_DEV_BILLING === 'true';
     const params = useLocalSearchParams<{ checkout?: string }>();
     const { loading, isPro, isSignedIn, userId, refreshAppState } = useAppState();
 
@@ -301,15 +302,17 @@ export default function PricingScreen() {
                                 </Label>
                             </Pressable>
 
-                            <Pressable
-                                style={[styles.dangerButton, (busy || loading || loadingBillingState) && styles.buttonDisabled]}
-                                onPress={handleDisableProDev}
-                                disabled={busy || loading || loadingBillingState}
-                            >
-                                <Label style={styles.primaryButtonText}>
-                                    {busy ? 'Working...' : 'Disable Pro (Dev Only)'}
-                                </Label>
-                            </Pressable>
+                            {enableDevBilling ? (
+                                <Pressable
+                                    style={[styles.dangerButton, (busy || loading) && styles.buttonDisabled]}
+                                    onPress={handleDisableProDev}
+                                    disabled={busy || loading}
+                                >
+                                    <Label style={styles.primaryButtonText}>
+                                        {busy ? 'Working...' : 'Disable Pro (Dev Only)'}
+                                    </Label>
+                                </Pressable>
+                            ) : null}
                         </>
                     ) : (
                         <>

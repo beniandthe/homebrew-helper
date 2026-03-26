@@ -25,7 +25,7 @@ function formatPlanDate(value: string | null) {
 
 export default function AccountScreen() {
   const configured = Boolean(supabase);
-
+  const enableDevBilling = process.env.EXPO_PUBLIC_ENABLE_DEV_BILLING === 'true';
   const [session, setSession] = useState<Session | null>(null);
   const [loadingSession, setLoadingSession] = useState(true);
 
@@ -285,19 +285,21 @@ export default function AccountScreen() {
               </>
             )}
 
-            <Pressable
-              style={[styles.button, busy && styles.buttonDisabled]}
-              onPress={handleTogglePro}
-              disabled={busy || loadingPlan}
-            >
-              <Label style={styles.buttonText}>
-                {busy
-                  ? 'Working...'
-                  : isPro
-                    ? 'Disable Pro Test Mode'
-                    : 'Enable Pro Test Mode'}
-              </Label>
-            </Pressable>
+            {enableDevBilling ? (
+              <Pressable
+                style={[styles.button, busy && styles.buttonDisabled]}
+                onPress={handleTogglePro}
+                disabled={busy || loadingPlan}
+              >
+                <Label style={styles.buttonText}>
+                  {busy
+                    ? 'Working...'
+                    : isPro
+                      ? 'Disable Pro Test Mode'
+                      : 'Enable Pro Test Mode'}
+                </Label>
+              </Pressable>
+            ) : null}
           </Card>
 
           <Card>
