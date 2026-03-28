@@ -9,6 +9,7 @@ import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
+import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
 
 type CampaignTone = 'heroic' | 'grim' | 'mystic' | 'political' | 'sandbox';
 
@@ -31,15 +32,6 @@ type LinkedProject = {
     updated_at: string;
 };
 
-function showMessage(title: string, message: string) {
-    if (Platform.OS === 'web') {
-        window.alert(`${title}\n\n${message}`);
-        return;
-    }
-
-    Alert.alert(title, message);
-}
-
 export default function CampaignScreen() {
     const params = useLocalSearchParams<{ projectId?: string }>();
 
@@ -61,6 +53,12 @@ export default function CampaignScreen() {
     const [linkedProjects, setLinkedProjects] = useState<LinkedProject[]>([]);
     const [loadingLinks, setLoadingLinks] = useState(false);
 
+    const [statusBanner, setStatusBanner] = useState<{
+        title?: string;
+        message: string;
+        variant: StatusBannerVariant;
+    } | null>(null);
+
     const {
         userId: sessionUserId,
         isPro,
@@ -72,6 +70,14 @@ export default function CampaignScreen() {
     const maxFreeSaves = 3;
     const isAtFreeLimit = !isPro && savedProjectCount >= maxFreeSaves;
     const isCreatingNewProject = !currentProjectId;
+
+    function setBanner(
+        variant: StatusBannerVariant,
+        title: string,
+        message: string
+    ) {
+        setStatusBanner({ variant, title, message });
+    }
 
     async function getLatestSaveAccess(userId: string) {
         if (!supabase) {
@@ -118,7 +124,7 @@ export default function CampaignScreen() {
                 .order('updated_at', { ascending: false });
 
             if (error) {
-                showMessage('Linked projects failed', error.message);
+                setBanner('error', 'Linked projects failed', error.message);
                 return;
             }
 
@@ -153,7 +159,7 @@ export default function CampaignScreen() {
                     .single();
 
                 if (error) {
-                    showMessage('Load failed', error.message);
+                    setBanner('error', 'Load failed', error.message);
                     return;
                 }
 
@@ -230,22 +236,22 @@ export default function CampaignScreen() {
             return;
         }
 
-        showMessage('Not supported yet', 'That linked project type cannot be opened yet.');
+        setBanner('info', 'Not supported yet', 'That linked project type cannot be opened yet.');
     }
 
     async function handleSaveProject(asNew = false) {
         if (!supabase) {
-            showMessage('Supabase not configured', 'Add your Supabase URL and anon key in the .env file.');
+            setBanner('error', 'Supabase not configured', 'Add your Supabase URL and anon key in the .env file.');
             return;
         }
 
         if (!sessionUserId) {
-            showMessage('Sign in required', 'Go to the Account tab and sign in before saving a campaign.');
+            setBanner('error', 'Sign in required', 'Go to the Account tab and sign in before saving a campaign.');
             return;
         }
 
         if (!isPro) {
-            showMessage('Pro required', 'Campaign Hub is a Pro-only workspace.');
+            setBanner('info', 'Pro required', 'Campaign Hub is a Pro-only workspace.');
             return;
         }
 
@@ -278,14 +284,14 @@ export default function CampaignScreen() {
                     .eq('user_id', sessionUserId);
 
                 if (error) {
-                    showMessage('Update failed', error.message);
+                    setBanner('error', 'Update failed', error.message);
                     return;
                 }
 
                 setLoadedProjectName(timestampName);
                 await refreshAppState();
                 await loadLinkedProjects(currentProjectId);
-                showMessage('Updated', 'Your campaign hub was updated successfully.');
+                setBanner('success', 'Updated', 'Your campaign hub was updated successfully.');
                 return;
             }
 
@@ -294,7 +300,8 @@ export default function CampaignScreen() {
                 const latestAccess = await getLatestSaveAccess(sessionUserId);
 
                 if (!latestAccess.isPro && latestAccess.count >= maxFreeSaves) {
-                    showMessage(
+                    setBanner(
+                        'info',
                         'Free limit reached',
                         'Free accounts can save up to 3 projects total. Upgrade to Pro for unlimited saves and campaign workspaces.'
                     );
@@ -314,7 +321,7 @@ export default function CampaignScreen() {
                 .single();
 
             if (error) {
-                showMessage('Save failed', error.message);
+                setBanner('error', 'Save failed', error.message);
                 return;
             }
 
@@ -323,7 +330,7 @@ export default function CampaignScreen() {
             setLinkedProjects([]);
             await refreshAppState();
 
-            showMessage('Saved', 'Your campaign hub was saved successfully.');
+            setBanner('success', 'Saved', 'Your campaign hub was saved successfully.');
         } finally {
             setSaving(false);
         }
@@ -342,6 +349,15 @@ export default function CampaignScreen() {
                         Campaign Hub is a Pro workspace for organizing encounters, loot, quests, and progression plans into one campaign.
                     </BodyText>
                 </Card>
+
+                {statusBanner ? (
+                    <StatusBanner
+                        title={statusBanner.title}
+                        message={statusBanner.message}
+                        variant={statusBanner.variant}
+                        onDismiss={() => setStatusBanner(null)}
+                    />
+                ) : null}
 
                 <UpgradeBanner
                     title="Campaign Hub is Pro-only"
@@ -370,6 +386,15 @@ export default function CampaignScreen() {
                     Organize your campaign identity, party focus, faction pressure, session prep, and linked toolkit projects.
                 </BodyText>
             </Card>
+
+            {statusBanner ? (
+                <StatusBanner
+                    title={statusBanner.title}
+                    message={statusBanner.message}
+                    variant={statusBanner.variant}
+                    onDismiss={() => setStatusBanner(null)}
+                />
+            ) : null}
 
             {loadingProject ? (
                 <Card>

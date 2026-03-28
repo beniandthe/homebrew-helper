@@ -8,6 +8,7 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { useAppState } from '@/contexts/AppStateContext';
+import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
 
 type SavedProject = {
   id: string;
@@ -41,6 +42,19 @@ export default function ProjectsScreen() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<ProjectFilter>('all');
   const { refreshAppState } = useAppState();
+  const [statusBanner, setStatusBanner] = useState<{
+    title?: string;
+    message: string;
+    variant: StatusBannerVariant;
+  } | null>(null);
+
+  function setBanner(
+    variant: StatusBannerVariant,
+    title: string,
+    message: string
+  ) {
+    setStatusBanner({ variant, title, message });
+  }
 
   useEffect(() => {
     if (!supabase) {
@@ -100,9 +114,9 @@ export default function ProjectsScreen() {
         .order('updated_at', { ascending: false });
 
       if (error) {
-        showMessage('Load failed', error.message);
+        setBanner('error', 'Load failed', error.message);
         return;
-      }
+        }
 
       setProjects((data as SavedProject[]) ?? []);
     } finally {
@@ -127,7 +141,7 @@ export default function ProjectsScreen() {
     const trimmedName = renameValue.trim();
 
     if (!trimmedName) {
-      showMessage('Invalid name', 'Project name cannot be empty.');
+      setBanner('error', 'Invalid name', 'Project name cannot be empty.');
       return;
     }
 
@@ -143,9 +157,9 @@ export default function ProjectsScreen() {
         .eq('id', projectId);
 
       if (error) {
-        showMessage('Rename failed', error.message);
+        setBanner('error', 'Rename failed', error.message);
         return;
-      }
+        }
 
       setProjects((current) =>
         current.map((project) =>
@@ -161,6 +175,7 @@ export default function ProjectsScreen() {
 
       setRenamingId(null);
       setRenameValue('');
+      setBanner('success', 'Project renamed', 'Your project name was updated successfully.');
     } finally {
       setDeletingId(null);
     }
@@ -190,12 +205,13 @@ export default function ProjectsScreen() {
         .eq('id', projectId);
 
       if (error) {
-        showMessage('Delete failed', error.message);
+        setBanner('error', 'Delete failed', error.message);
         return;
-      }
+        }
 
       setProjects((current) => current.filter((project) => project.id !== projectId));
       await refreshAppState();
+      setBanner('success', 'Project deleted', 'The project was removed successfully.');
     } finally {
       setDeletingId(null);
     }
@@ -217,6 +233,16 @@ export default function ProjectsScreen() {
           View and manage saved calculator and generator projects.
         </BodyText>
       </Card>
+
+      {statusBanner ? (
+        <StatusBanner
+          title={statusBanner.title}
+          message={statusBanner.message}
+          variant={statusBanner.variant}
+          onDismiss={() => setStatusBanner(null)}
+        />
+      ) : null}
+      
       <Card>
         <Label>Filter</Label>
         <View style={styles.filterRow}>

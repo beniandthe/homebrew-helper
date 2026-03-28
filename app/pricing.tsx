@@ -7,15 +7,8 @@ import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
+import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
 
-function showMessage(title: string, message: string) {
-    if (Platform.OS === 'web') {
-        window.alert(`${title}\n\n${message}`);
-        return;
-    }
-
-    Alert.alert(title, message);
-}
 
 function formatPlanDate(value: string | null) {
     if (!value) return null;
@@ -42,6 +35,20 @@ export default function PricingScreen() {
     const params = useLocalSearchParams<{ checkout?: string }>();
     const { loading, isPro, isSignedIn, userId, refreshAppState } = useAppState();
 
+    const [statusBanner, setStatusBanner] = useState<{
+        title?: string;
+        message: string;
+        variant: StatusBannerVariant;
+    } | null>(null);
+
+    function setBanner(
+        variant: StatusBannerVariant,
+        title: string,
+        message: string
+    ) {
+        setStatusBanner({ variant, title, message });
+    }
+
     async function loadBillingState(nextUserId: string) {
         if (!supabase) return;
 
@@ -55,7 +62,7 @@ export default function PricingScreen() {
                 .maybeSingle();
 
             if (error) {
-                showMessage('Plan load failed', error.message);
+                setBanner('error', 'Plan load failed', error.message);
                 return;
             }
 
@@ -80,26 +87,39 @@ export default function PricingScreen() {
 
     useEffect(() => {
         if (params.checkout === 'success') {
+            setBanner(
+                'success',
+                'Purchase completed',
+                'Your Pro access is active on this account.'
+            );
             refreshAppState();
             if (userId) {
                 loadBillingState(userId);
             }
         }
+
+        if (params.checkout === 'cancelled') {
+            setBanner(
+                'info',
+                'Checkout canceled',
+                'Your subscription was not changed.'
+            );
+        }
     }, [params.checkout, refreshAppState, userId]);
 
     async function handleUpgradePress() {
         if (!supabase) {
-            showMessage('Supabase not configured', 'Missing Supabase configuration.');
+            setBanner('error', 'Supabase not configured', 'Missing Supabase configuration.');
             return;
         }
 
         if (!isSignedIn || !userId) {
-            showMessage('Sign in required', 'Please sign in before upgrading to Pro.');
+            setBanner('error', 'Sign in required', 'Please sign in before upgrading to Pro.');
             return;
         }
 
         if (isPro && !cancelAtPeriodEnd) {
-            showMessage('Pro already active', 'Your account already has Pro enabled.');
+            setBanner('info', 'Pro already active', 'Your account already has Pro enabled.');
             return;
         }
 
@@ -111,12 +131,12 @@ export default function PricingScreen() {
             });
 
             if (error) {
-                showMessage('Checkout failed', error.message);
+                setBanner('error', 'Checkout failed', error.message);
                 return;
             }
 
             if (!data?.url) {
-                showMessage('Checkout failed', 'No checkout URL was returned.');
+                setBanner('error', 'Checkout failed', 'No checkout URL was returned.');
                 return;
             }
 
@@ -125,7 +145,8 @@ export default function PricingScreen() {
                 return;
             }
 
-            showMessage(
+            setBanner(
+                'info',
                 'Web checkout required',
                 'Stripe checkout is currently set up for web only.'
             );
@@ -136,17 +157,17 @@ export default function PricingScreen() {
 
     async function handleManageSubscriptionPress() {
         if (!supabase) {
-            showMessage('Supabase not configured', 'Missing Supabase configuration.');
+            setBanner('error', 'Supabase not configured', 'Missing Supabase configuration.');
             return;
         }
 
         if (!isSignedIn || !userId) {
-            showMessage('Sign in required', 'Please sign in before managing your subscription.');
+            setBanner('error', 'Sign in required', 'Please sign in before managing your subscription.');
             return;
         }
 
         if (!isPro) {
-            showMessage('No active Pro plan', 'Upgrade to Pro before managing a subscription.');
+            setBanner('info', 'No active Pro plan', 'Upgrade to Pro before managing a subscription.');
             return;
         }
 
@@ -158,12 +179,12 @@ export default function PricingScreen() {
             });
 
             if (error) {
-                showMessage('Portal failed', error.message);
+                setBanner('error', 'Portal failed', error.message);
                 return;
             }
 
             if (!data?.url) {
-                showMessage('Portal failed', 'No portal URL was returned.');
+                setBanner('error', 'Portal failed', 'No portal URL was returned.');
                 return;
             }
 
@@ -172,7 +193,8 @@ export default function PricingScreen() {
                 return;
             }
 
-            showMessage(
+            setBanner(
+                'info',
                 'Web portal required',
                 'Subscription management is currently set up for web only.'
             );
@@ -210,7 +232,7 @@ export default function PricingScreen() {
             });
 
             if (error) {
-                showMessage('Downgrade failed', error.message);
+                setBanner('error', 'Downgrade failed', error.message);
                 return;
             }
 
@@ -219,7 +241,8 @@ export default function PricingScreen() {
             setCurrentPeriodEnd(null);
             setCanceledAt(null);
 
-            showMessage(
+            setBanner(
+                'success',
                 'Pro disabled',
                 'Dev Pro access has been removed. Campaigns, linked campaign projects, and extra standalone projects beyond the free limit were deleted.'
             );
@@ -260,6 +283,15 @@ export default function PricingScreen() {
                         Manage your current plan and upgrade when you need unlimited saved projects.
                     </BodyText>
                 </Card>
+
+                {statusBanner ? (
+                    <StatusBanner
+                        title={statusBanner.title}
+                        message={statusBanner.message}
+                        variant={statusBanner.variant}
+                        onDismiss={() => setStatusBanner(null)}
+                    />
+                ) : null}
 
                 <Card>
                     <Label>Current Plan</Label>

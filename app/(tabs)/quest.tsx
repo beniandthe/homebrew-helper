@@ -11,6 +11,7 @@ import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
+import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
 
 type QuestTone = 'heroic' | 'grim' | 'mystic' | 'political';
 type QuestScope = 'personal' | 'local' | 'regional' | 'faction';
@@ -68,6 +69,12 @@ export default function QuestScreen() {
         refreshAppState,
     } = useAppState();
 
+    const [statusBanner, setStatusBanner] = useState<{
+        title?: string;
+        message: string;
+        variant: StatusBannerVariant;
+    } | null>(null);
+
     const maxFreeSaves = 3;
     const isAtFreeLimit = !isPro && savedProjectCount >= maxFreeSaves;
     const isCreatingNewProject = !currentProjectId;
@@ -75,6 +82,14 @@ export default function QuestScreen() {
     const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
     const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
     const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+
+    function setBanner(
+        variant: StatusBannerVariant,
+        title: string,
+        message: string
+    ) {
+        setStatusBanner({ variant, title, message });
+      }
 
     async function getLatestSaveAccess(userId: string) {
         if (!supabase) {
@@ -121,7 +136,7 @@ export default function QuestScreen() {
                 .order('updated_at', { ascending: false });
 
             if (error) {
-                showMessage('Campaign load failed', error.message);
+                setBanner('error', 'Campaign load failed', error.message);
                 return;
             }
 
@@ -169,7 +184,7 @@ export default function QuestScreen() {
                     .single();
 
                 if (error) {
-                    showMessage('Load failed', error.message);
+                    setBanner('error', 'Load failed', error.message);
                     return;
                 }
 
@@ -409,12 +424,12 @@ export default function QuestScreen() {
 
     async function handleSaveProject(asNew = false) {
         if (!supabase) {
-            showMessage('Supabase not configured', 'Add your Supabase URL and anon key in the .env file.');
+            setBanner('error', 'Supabase not configured', 'Add your Supabase URL and anon key in the .env file.');
             return;
         }
 
         if (!sessionUserId) {
-            showMessage('Sign in required', 'Go to the Account tab and sign in before saving a project.');
+            setBanner('error', 'Sign in required', 'Go to the Account tab and sign in before saving a project.');
             return;
         }
 
@@ -437,13 +452,13 @@ export default function QuestScreen() {
                     .eq('user_id', sessionUserId);
 
                 if (error) {
-                    showMessage('Update failed', error.message);
+                    setBanner('error', 'Update failed', error.message);
                     return;
                 }
 
                 await refreshAppState();
                 setSelectedCampaignId('');
-                showMessage('Updated', 'Your quest project was updated successfully.');
+                setBanner('success', 'Updated', 'Your quest project was updated successfully.');
                 return;
             }
 
@@ -452,14 +467,11 @@ export default function QuestScreen() {
                 const latestAccess = await getLatestSaveAccess(sessionUserId);
 
                 if (!latestAccess.isPro && latestAccess.count >= maxFreeSaves) {
-                    showMessage(
-                        'Free limit reached',
-                        'Free accounts can save up to 3 projects total. Upgrade to Pro for unlimited saves.'
-                    );
+                    setBanner('info', 'Free limit reached', 'Free accounts can save up to 3 projects total. Upgrade to Pro for unlimited saves.');
                     return;
                 }
             }
-
+                       
             const { data, error } = await supabase
                 .from('saved_projects')
                 .insert({
@@ -473,7 +485,7 @@ export default function QuestScreen() {
                 .single();
 
             if (error) {
-                showMessage('Save failed', error.message);
+                setBanner('error', 'Save failed', error.message);
                 return;
             }
 
@@ -482,7 +494,7 @@ export default function QuestScreen() {
             setSelectedCampaignId('');
             await refreshAppState();
 
-            showMessage('Saved', 'Your quest project was saved successfully.');
+            setBanner('success', 'Saved', 'Your quest project was saved successfully.');
         } finally {
             setSaving(false);
         }
@@ -494,22 +506,22 @@ export default function QuestScreen() {
 
     async function handleSaveToCampaign() {
         if (!supabase) {
-            showMessage('Supabase not configured', 'Add your Supabase URL and anon key in the .env file.');
+            setBanner('error', 'Supabase not configured', 'Add your Supabase URL and anon key in the .env file.');
             return;
         }
 
         if (!sessionUserId) {
-            showMessage('Sign in required', 'Go to the Account tab and sign in before saving to a campaign.');
+            setBanner('error', 'Sign in required', 'Go to the Account tab and sign in before saving to a campaign.');
             return;
         }
 
         if (!isPro) {
-            showMessage('Pro required', 'Campaign workspaces are available on Pro.');
+            setBanner('error', 'Pro required', 'Campaign workspaces are available on Pro.');
             return;
         }
 
         if (!selectedCampaignId) {
-            showMessage('Select a campaign', 'Choose a campaign before adding this project.');
+            setBanner('error', 'Select a campaign', 'Choose a campaign before adding this project.');
             return;
         }
 
@@ -532,12 +544,12 @@ export default function QuestScreen() {
                     .eq('user_id', sessionUserId);
 
                 if (error) {
-                    showMessage('Campaign update failed', error.message);
+                    setBanner('error', 'Campaign update failed', error.message);
                     return;
                 }
 
                 await refreshAppState();
-                showMessage('Campaign updated', 'This project is now linked to the selected campaign.');
+                setBanner('success', 'Campaign updated', 'This project is now linked to the selected campaign.');
                 return;
             }
 
@@ -554,7 +566,7 @@ export default function QuestScreen() {
                 .single();
 
             if (error) {
-                showMessage('Campaign save failed', error.message);
+                setBanner('error', 'Campaign save failed', error.message);
                 return;
             }
 
@@ -562,7 +574,7 @@ export default function QuestScreen() {
             setCurrentProjectId(data?.id ?? null);
             await refreshAppState();
 
-            showMessage('Added to campaign', 'This project was saved into the selected campaign.');
+            setBanner('success', 'Added to campaign', 'This project was saved into the selected campaign.');
         } finally {
             setSaving(false);
         }
@@ -576,6 +588,15 @@ export default function QuestScreen() {
                     Build practical quest structure with hooks, twists, consequences, alternate resolutions, and faction pressure.
                 </BodyText>
             </Card>
+
+            {statusBanner ? (
+                <StatusBanner
+                    title={statusBanner.title}
+                    message={statusBanner.message}
+                    variant={statusBanner.variant}
+                    onDismiss={() => setStatusBanner(null)}
+                />
+            ) : null}
 
             <ProCard
                 isPro={isPro}
