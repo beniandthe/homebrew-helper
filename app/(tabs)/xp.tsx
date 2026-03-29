@@ -12,6 +12,7 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { buildSeed, pickManyFromPool } from '@/lib/generation';
 
 type CurveType = 'linear' | 'smooth' | 'steep';
 type ProgressionPreset = 'slow' | 'standard' | 'heroic' | 'brutal' | 'custom';
@@ -60,6 +61,7 @@ export default function XpCalculatorScreen() {
   const [encountersPerSession, setEncountersPerSession] = useState('2');
   const [encountersPerLevel, setEncountersPerLevel] = useState('4');
   const [progressionNotes, setProgressionNotes] = useState('');
+  const [variationSeed, setVariationSeed] = useState(0);
 
   const [saving, setSaving] = useState(false);
 
@@ -339,6 +341,21 @@ export default function XpCalculatorScreen() {
       `Level ${parsedLevels}: reserve for endgame mastery, capstone, or finale content.`,
     ];
 
+    const seed = buildSeed(
+      [
+        parsedLevels,
+        parsedBaseXp,
+        parsedGrowthFactor,
+        curveType,
+        progressionPreset,
+        progressionMode,
+        parsedEncountersPerSession,
+        parsedEncountersPerLevel,
+        progressionNotes.trim(),
+        variationSeed,
+      ].join('|')
+    );
+
     const practicalAdvice: string[] = [];
 
     if (progressionMode === 'milestone') {
@@ -367,13 +384,51 @@ export default function XpCalculatorScreen() {
       practicalAdvice.push('This progression setup should be broadly usable for a typical campaign arc.');
     }
 
+    const pacingVariants = pickManyFromPool(
+      [
+        'Give bonus XP for social and exploration wins to stabilize uneven combat schedules.',
+        'Batch level-ups at chapter breaks so power spikes align with story arcs.',
+        'Use downtime milestones to smooth campaigns with irregular attendance.',
+        'Mark one “catch-up” level where under-leveled characters can close the gap.',
+        'Reserve one bonus progression beat for completing a personal character goal.',
+        'Gate high-level features behind faction or world unlocks to pace late-game complexity.',
+        'Award “goal XP” for completing prep-defined objectives unrelated to combat.',
+        'Use level sync windows so new characters can join without lagging far behind.',
+        'Replace one grind-heavy level with a narrative training montage advancement.',
+        'Tie one level-up to a region unlock so exploration directly feeds progression.',
+        'Offer optional hard-mode encounters that grant accelerated progression.',
+        'Convert failed missions into partial XP so losses still advance the campaign.',
+      ],
+      2,
+      seed + 19
+    );
+
+    const milestoneVariantSuggestions = pickManyFromPool(
+      [
+        `Level ${Math.max(2, Math.floor(parsedLevels * 0.2))}: add a defensive feature or survivability bump.`,
+        `Level ${Math.max(5, Math.floor(parsedLevels * 0.45))}: unlock faction command privileges or social leverage.`,
+        `Level ${Math.max(7, Math.floor(parsedLevels * 0.7))}: introduce advanced tactical options or signature spell tier.`,
+        `Level ${Math.max(8, Math.floor(parsedLevels * 0.8))}: provide travel, teleport, or strategic mobility access.`,
+        `Level ${Math.max(9, parsedLevels - 2)}: preview finale mechanics with a controlled challenge.`,
+      ],
+      2,
+      seed + 41
+    );
+
+    const orderedMilestoneSuggestions = [...milestoneSuggestions, ...milestoneVariantSuggestions].sort((a, b) => {
+      const levelA = Number.parseInt(a.match(/Level\s+(\d+)/i)?.[1] ?? '0', 10);
+      const levelB = Number.parseInt(b.match(/Level\s+(\d+)/i)?.[1] ?? '0', 10);
+      return levelA - levelB;
+    });
+
     return {
       rows,
       totalEncounterCount,
       estimatedSessionsToCap,
       pacingAssessment,
-      milestoneSuggestions,
+      milestoneSuggestions: orderedMilestoneSuggestions,
       practicalAdvice,
+      pacingVariants,
     };
   }, [
     levels,
@@ -383,6 +438,9 @@ export default function XpCalculatorScreen() {
     progressionMode,
     encountersPerSession,
     encountersPerLevel,
+    progressionPreset,
+    progressionNotes,
+    variationSeed,
   ]);
 
   function buildPayload() {
@@ -396,6 +454,7 @@ export default function XpCalculatorScreen() {
       encountersPerSession: Number.parseInt(encountersPerSession || '1', 10),
       encountersPerLevel: Number.parseInt(encountersPerLevel || '1', 10),
       progressionNotes,
+      variationSeed,
       result,
     };
   }
@@ -798,6 +857,9 @@ export default function XpCalculatorScreen() {
           placeholder="Subclass unlock at 3, faction milestone at 6, artifact tier at 10..."
           multiline
         />
+        <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
+          <Label style={styles.secondaryButtonText}>Reroll Pacing Ideas</Label>
+        </Pressable>
 
         <View style={styles.saveRow}>
           <View style={styles.actionRow}>
@@ -905,6 +967,15 @@ export default function XpCalculatorScreen() {
         <Label>Practical Advice</Label>
         <View style={styles.resultRow}>
           {result.practicalAdvice.map((entry, index) => (
+            <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+          ))}
+        </View>
+      </Card>
+
+      <Card>
+        <Label>Optional Pacing Variants</Label>
+        <View style={styles.resultRow}>
+          {result.pacingVariants.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
