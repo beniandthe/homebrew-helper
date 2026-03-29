@@ -415,12 +415,18 @@ export default function XpCalculatorScreen() {
       seed + 41
     );
 
+    const orderedMilestoneSuggestions = [...milestoneSuggestions, ...milestoneVariantSuggestions].sort((a, b) => {
+      const levelA = Number.parseInt(a.match(/Level\s+(\d+)/i)?.[1] ?? '0', 10);
+      const levelB = Number.parseInt(b.match(/Level\s+(\d+)/i)?.[1] ?? '0', 10);
+      return levelA - levelB;
+    });
+
     return {
       rows,
       totalEncounterCount,
       estimatedSessionsToCap,
       pacingAssessment,
-      milestoneSuggestions: [...milestoneSuggestions, ...milestoneVariantSuggestions],
+      milestoneSuggestions: orderedMilestoneSuggestions,
       practicalAdvice,
       pacingVariants,
     };
