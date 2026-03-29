@@ -10,6 +10,7 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { buildSeed, pickManyFromPool } from '@/lib/generation';
 
 type CampaignTone = 'heroic' | 'grim' | 'mystic' | 'political' | 'sandbox';
 
@@ -44,6 +45,7 @@ export default function CampaignScreen() {
     const [campaignSummary, setCampaignSummary] = useState('');
     const [currentObjective, setCurrentObjective] = useState('');
     const [sessionNotes, setSessionNotes] = useState('');
+    const [variationSeed, setVariationSeed] = useState(0);
 
     const [loadingProject, setLoadingProject] = useState(false);
     const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
@@ -207,13 +209,45 @@ export default function CampaignScreen() {
                 ? 'Session notes are active and ready for ongoing prep.'
                 : 'No session notes yet. Add recap points, hooks, or unresolved threads.';
 
+        const seed = buildSeed(
+            `${campaignName}|${systemName}|${tone}|${levelBand}|${partyName}|${mainFaction}|${campaignSummary}|${currentObjective}|${sessionNotes}|${variationSeed}`
+        );
+
         return {
             summary,
             objective,
             notesState,
             toneSummary: `${tone} tone • ${levelBand} • ${systemName}`,
+            campaignPulse:
+                tone === 'heroic'
+                    ? 'Escalate hope vs. danger each session with visible stakes and recoverable losses.'
+                    : tone === 'grim'
+                        ? 'Keep trade-offs costly and let victories carry visible scars.'
+                        : tone === 'mystic'
+                            ? 'Reveal layered truths gradually and make mysteries alter player assumptions.'
+                            : tone === 'political'
+                                ? 'Track factions as active agents; every move should shift leverage.'
+                                : 'Offer multiple hooks in parallel so players choose direction and pacing.',
+            prepAngles: pickManyFromPool(
+                [
+                    'Create a faction clock with 3 visible stages and one hidden tipping point.',
+                    'Write one consequence that lands if the party ignores the current objective.',
+                    'Add a non-combat obstacle that still advances the main faction storyline.',
+                    'Prepare one ally scene and one rival scene to react to the same decision.',
+                    'Reveal a clue that reframes an earlier session without invalidating it.',
+                    'Introduce a resource pressure (time, supplies, influence) to reinforce stakes.',
+                    'Define one rumor that is true, one that is false, and one that is partially true.',
+                    'Prepare two fallback routes if the party skips the expected objective.',
+                    'Map one location that can host both diplomacy and combat resolutions.',
+                    'Tie one loot reward directly to a future quest or faction negotiation.',
+                    'Advance a background threat by one step if players take a long rest.',
+                    'Prewrite one NPC reaction line for success, failure, and moral compromise.',
+                ],
+                2,
+                seed + 7
+            ),
         };
-    }, [campaignSummary, currentObjective, sessionNotes, tone, levelBand, systemName]);
+    }, [campaignName, systemName, tone, levelBand, partyName, mainFaction, campaignSummary, currentObjective, sessionNotes, variationSeed]);
 
     function openLinkedProject(project: LinkedProject) {
         if (project.tool_type === 'xp_calculator') {
@@ -268,6 +302,7 @@ export default function CampaignScreen() {
                 campaignSummary,
                 currentObjective,
                 sessionNotes,
+                variationSeed,
             };
 
             const timestampName = campaignName.trim() || `Campaign - ${new Date().toLocaleString()}`;
@@ -465,6 +500,9 @@ export default function CampaignScreen() {
                     placeholder="Recap, unresolved hooks, next-scene prep, NPC reminders..."
                     multiline
                 />
+                <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
+                    <Label style={styles.secondaryButtonText}>Reroll Prep Angles</Label>
+                </Pressable>
 
                 <View style={styles.saveRow}>
                     <View style={styles.actionRow}>
@@ -518,6 +556,7 @@ export default function CampaignScreen() {
                 <View style={styles.resultRow}>
                     <BodyText>Summary: {campaignSnapshot.summary}</BodyText>
                     <BodyText>Current objective: {campaignSnapshot.objective}</BodyText>
+                    <BodyText>Campaign pulse: {campaignSnapshot.campaignPulse}</BodyText>
                 </View>
             </Card>
 
@@ -525,6 +564,15 @@ export default function CampaignScreen() {
                 <Label>Session Readiness</Label>
                 <View style={styles.resultRow}>
                     <BodyText>{campaignSnapshot.notesState}</BodyText>
+                </View>
+            </Card>
+
+            <Card>
+                <Label>Prep Angles</Label>
+                <View style={styles.resultRow}>
+                    {campaignSnapshot.prepAngles.map((entry, index) => (
+                        <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+                    ))}
                 </View>
             </Card>
 

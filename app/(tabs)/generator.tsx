@@ -12,6 +12,7 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { buildSeed, pickFromPool, pickManyFromPool } from '@/lib/generation';
 
 type LootRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
 type RewardType = 'gear' | 'gold' | 'consumable' | 'material';
@@ -47,6 +48,7 @@ export default function LootScreen() {
   const [rewardTheme, setRewardTheme] = useState<RewardTheme>('martial');
   const [bundleStyle, setBundleStyle] = useState<BundleStyle>('balanced');
   const [prepNotes, setPrepNotes] = useState('');
+  const [variationSeed, setVariationSeed] = useState(0);
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -295,41 +297,50 @@ export default function LootScreen() {
 
     const themedItems: Record<RewardTheme, Record<RewardType, string[]>> = {
       arcane: {
-        gear: ['Runed Focus', 'Spellthread Cloak', 'Sigil Rod', 'Aether Band', 'Moonglass Dagger'],
-        gold: ['Mage Stipend', 'Sealed Coin Tube', 'Arcane Treasury Token', 'Guild Payout', 'Star Mint Scrip'],
-        consumable: ['Mana Tonic', 'Blink Dust', 'Scroll of Sparks', 'Elixir of Clarity', 'Ward Oil'],
-        material: ['Aether Crystal', 'Spellglass Shard', 'Runic Ink', 'Leyroot Fiber', 'Moonstone Dust'],
+        gear: ['Runed Focus', 'Spellthread Cloak', 'Sigil Rod', 'Aether Band', 'Moonglass Dagger', 'Chrono Filigree Gloves', 'Glyphbound Lantern', 'Astral Chain Sash'],
+        gold: ['Mage Stipend', 'Sealed Coin Tube', 'Arcane Treasury Token', 'Guild Payout', 'Star Mint Scrip', 'Leyline Credit Chit', 'Tower Research Grant', 'Conclave Retainer Purse'],
+        consumable: ['Mana Tonic', 'Blink Dust', 'Scroll of Sparks', 'Elixir of Clarity', 'Ward Oil', 'Phasing Philter', 'Counterspell Capsule', 'Focus Draught'],
+        material: ['Aether Crystal', 'Spellglass Shard', 'Runic Ink', 'Leyroot Fiber', 'Moonstone Dust', 'Planar Brass', 'Prismatic Sand', 'Echo Sigil Plate'],
       },
       divine: {
-        gear: ['Blessed Shield', 'Sunmetal Charm', 'Saint’s Cloak', 'Votive Blade', 'Halo Pendant'],
-        gold: ['Temple Tithe', 'Pilgrim Offering', 'Consecrated Coin Roll', 'Relic Fund', 'Blessed Purse'],
-        consumable: ['Healing Draught', 'Holy Water Flask', 'Incense Bundle', 'Prayer Candle Kit', 'Purity Tonic'],
-        material: ['Silver Filament', 'Blessed Resin', 'Sanctified Ash', 'Dawn Petal', 'Halo Sand'],
+        gear: ['Blessed Shield', 'Sunmetal Charm', 'Saint’s Cloak', 'Votive Blade', 'Halo Pendant', 'Choirsteel Helm', 'Reliquary Bracers', 'Oathwoven Tabard'],
+        gold: ['Temple Tithe', 'Pilgrim Offering', 'Consecrated Coin Roll', 'Relic Fund', 'Blessed Purse', 'Cathedral Endowment', 'Shrine Stipend', 'Monastic Treasury Script'],
+        consumable: ['Healing Draught', 'Holy Water Flask', 'Incense Bundle', 'Prayer Candle Kit', 'Purity Tonic', 'Mercy Serum', 'Sunburst Vial', 'Sanctuary Capsule'],
+        material: ['Silver Filament', 'Blessed Resin', 'Sanctified Ash', 'Dawn Petal', 'Halo Sand', 'Seraph Glass', 'Sungold Leaf', 'Votive Wax'],
       },
       cursed: {
-        gear: ['Hexbound Ring', 'Blood-etched Knife', 'Wailing Locket', 'Shadowmail', 'Marked Bow'],
-        gold: ['Black Coin Pouch', 'Forbidden Tribute', 'Grave Mint Coins', 'Night Tax Chest', 'Sin Ledger Voucher'],
-        consumable: ['Rot Flask', 'Nightshade Tonic', 'Ash Smoke Bomb', 'Curse Ink Vial', 'Bone Elixir'],
-        material: ['Witchbone Dust', 'Rot Resin', 'Shade Thread', 'Black Salt', 'Grave Wax'],
+        gear: ['Hexbound Ring', 'Blood-etched Knife', 'Wailing Locket', 'Shadowmail', 'Marked Bow', 'Widowbrand Chain', 'Penance Mask', 'Eclipsed Handaxe'],
+        gold: ['Black Coin Pouch', 'Forbidden Tribute', 'Grave Mint Coins', 'Night Tax Chest', 'Sin Ledger Voucher', 'Debt Collector Writ', 'Raven Toll Purse', 'Exile Bounty Token'],
+        consumable: ['Rot Flask', 'Nightshade Tonic', 'Ash Smoke Bomb', 'Curse Ink Vial', 'Bone Elixir', 'Doom Draught', 'Warding Blight Balm', 'Hexbreaker Capsule'],
+        material: ['Witchbone Dust', 'Rot Resin', 'Shade Thread', 'Black Salt', 'Grave Wax', 'Ebon Amber', 'Fate Ash', 'Mourning Iron'],
       },
       martial: {
-        gear: ['Iron Blade', 'Hunter Bow', 'Runed Shield', 'Traveler Armor', 'Moon Dagger'],
-        gold: ['Mercenary Purse', 'War Chest Coins', 'Captain’s Payout', 'Field Bounty', 'Supply Voucher'],
-        consumable: ['Battle Tonic', 'Fire Flask', 'Sharpening Oil', 'Smoke Bomb', 'Stamina Draught'],
-        material: ['Iron Ore', 'Hardened Leather', 'Weapon Resin', 'Steel Rivets', 'Arrow Fletching'],
+        gear: ['Iron Blade', 'Hunter Bow', 'Runed Shield', 'Traveler Armor', 'Moon Dagger', 'Siegebreaker Maul', 'Vanguard Spear', 'Skirmisher Buckler'],
+        gold: ['Mercenary Purse', 'War Chest Coins', 'Captain’s Payout', 'Field Bounty', 'Supply Voucher', 'Quartermaster Ration Scrip', 'Warlord Bonus Purse', 'Veteran Severance Roll'],
+        consumable: ['Battle Tonic', 'Fire Flask', 'Sharpening Oil', 'Smoke Bomb', 'Stamina Draught', 'Adrenaline Vial', 'Fortify Draft', 'Second Wind Salve'],
+        material: ['Iron Ore', 'Hardened Leather', 'Weapon Resin', 'Steel Rivets', 'Arrow Fletching', 'Tempered Steel Ingot', 'Siege Twine Bundle', 'Reinforced Plate Straps'],
       },
       wilderness: {
-        gear: ['Thorn Knife', 'Ranger Hood', 'Bone Charm', 'Mosscloak', 'Trail Bow'],
-        gold: ['Ranger Cache', 'Hunter’s Purse', 'Frontier Scrip', 'Camp Payout', 'Forest Trade Coin'],
-        consumable: ['Antidote Kit', 'Healing Herb Pack', 'Beast Lure', 'Trail Ration Bundle', 'Camouflage Paste'],
-        material: ['Ancient Bark', 'Beast Pelt', 'Green Resin', 'Feather Bundle', 'Spirit Herb'],
+        gear: ['Thorn Knife', 'Ranger Hood', 'Bone Charm', 'Mosscloak', 'Trail Bow', 'Rootbound Axe', 'Skywatch Cloak', 'Tanglehook Whip'],
+        gold: ['Ranger Cache', 'Hunter’s Purse', 'Frontier Scrip', 'Camp Payout', 'Forest Trade Coin', 'Pathfinder Wages', 'Druidic Trade Vouchers', 'Wildland Permit Tokens'],
+        consumable: ['Antidote Kit', 'Healing Herb Pack', 'Beast Lure', 'Trail Ration Bundle', 'Camouflage Paste', 'Scent Mask Oil', 'Predator Ward Salve', 'Stormleaf Tea'],
+        material: ['Ancient Bark', 'Beast Pelt', 'Green Resin', 'Feather Bundle', 'Spirit Herb', 'Wyvern Tendon', 'Verdant Ore', 'Star Moss Bundle'],
       },
       noble: {
-        gear: ['Signet Rapier', 'Velvet Mantle', 'House Brooch', 'Court Dagger', 'Gilded Buckler'],
-        gold: ['Estate Purse', 'Court Reward', 'Tax Ledger Coin', 'Patron’s Gift', 'Silkbound Pouch'],
-        consumable: ['Perfumed Tonic', 'Courtly Elixir', 'Fine Oil Flask', 'Banquet Reserve', 'Luxury Remedy'],
-        material: ['Silk Thread', 'Gold Leaf', 'Fine Leather', 'Pearl Dust', 'Polished Lacquer'],
+        gear: ['Signet Rapier', 'Velvet Mantle', 'House Brooch', 'Court Dagger', 'Gilded Buckler', 'Duelist Caneblade', 'Regent Mail Veil', 'Embassy Cloakpin'],
+        gold: ['Estate Purse', 'Court Reward', 'Tax Ledger Coin', 'Patron’s Gift', 'Silkbound Pouch', 'Council Honorarium', 'Trade House Dividend', 'Royal Charter Writ'],
+        consumable: ['Perfumed Tonic', 'Courtly Elixir', 'Fine Oil Flask', 'Banquet Reserve', 'Luxury Remedy', 'Composure Serum', 'Etiquette Draught', 'Imperial Antitoxin'],
+        material: ['Silk Thread', 'Gold Leaf', 'Fine Leather', 'Pearl Dust', 'Polished Lacquer', 'Star Sapphire Chips', 'Embossed Silver Plate', 'Royal Wax Seal Kit'],
       },
+    };
+
+    const itemDetailLibrary: Record<string, { description: string; statLine: string }> = {
+      'Runed Focus': { description: 'An etched focus that hums when hostile magic is near.', statLine: '+1 spell attack rolls; once/long rest advantage on Arcana.' },
+      'Blessed Shield': { description: 'Sun-marked shield carried by temple wardens.', statLine: '+1 AC; once/day reduce radiant or necrotic damage by 1d8.' },
+      'Hexbound Ring': { description: 'A ring that stores one resolved curse for study.', statLine: 'Advantage on one curse-related save per long rest.' },
+      'Iron Blade': { description: 'Balanced war blade forged for relentless field use.', statLine: '+1 to hit; +2 damage vs. armored targets.' },
+      'Thorn Knife': { description: 'A serrated knife favored by scouts and skirmishers.', statLine: 'Bleed for 1 damage/round (2 rounds) on critical hit.' },
+      'Signet Rapier': { description: 'A noble dueling weapon with concealed house mark.', statLine: '+1 initiative; +1d4 damage when dueling a single foe.' },
     };
 
     const flavorNotes: Record<RewardSource, string> = {
@@ -341,15 +352,21 @@ export default function LootScreen() {
     };
 
     const itemPool = themedItems[rewardTheme][rewardType];
-    const seed =
-      parsedPlayerLevel * 7 +
-      parsedEnemyTier * 13 +
-      rewardTheme.length * 5 +
-      rewardSource.length * 3 +
-      rarity.length;
+    const seed = buildSeed(
+      [
+        parsedPlayerLevel,
+        parsedEnemyTier,
+        rewardType,
+        rarity,
+        rewardSource,
+        rewardTheme,
+        bundleStyle,
+        prepNotes.trim(),
+        variationSeed,
+      ].join('|')
+    );
 
-    const itemIndex = seed % itemPool.length;
-    const itemName = itemPool[itemIndex];
+    const itemName = pickFromPool(itemPool, seed, 3);
 
     const bonusPool =
       bundleStyle === 'lean'
@@ -358,7 +375,7 @@ export default function LootScreen() {
           ? ['supplemental crafting materials', 'backup consumable pack', 'small secondary item']
           : ['bonus rare material bundle', 'secondary themed item', 'extra coin cache'];
 
-    const bonusItem = bonusPool[seed % bonusPool.length];
+    const bonusItem = pickFromPool(bonusPool, seed, 11);
 
     const practicalAdvice: string[] = [];
 
@@ -381,15 +398,33 @@ export default function LootScreen() {
       practicalAdvice.push('This reward bundle is broadly usable as-is for a typical session reward.');
     }
 
+    const encounterHooks = pickManyFromPool(
+      [
+        'Guardians of the reward return after one long rest unless appeased.',
+        'The item resonates near a hidden vault keyed to this theme.',
+        'A rival group can identify this reward and track the party by it.',
+        'The reward can be upgraded by completing a linked side objective.',
+        'Using this reward publicly changes how one faction responds to the party.',
+        'The reward contains a map clue toward a higher-tier location.',
+      ],
+      2,
+      seed + 29
+    );
+
     return {
       itemName,
       bonusItem,
       goldAmount,
       flavorNote: flavorNotes[rewardSource],
       practicalAdvice,
+      encounterHooks,
+      itemDetail: itemDetailLibrary[itemName] ?? {
+        description: 'A strong thematic reward suitable for this table result.',
+        statLine: 'Treat as tier-appropriate gear with one small situational bonus.',
+      },
       rewardSummary: `${rarity} ${rewardTheme} ${rewardType} reward from a ${rewardSource} source.`,
     };
-  }, [playerLevel, enemyTier, rewardType, rarity, rewardSource, rewardTheme, bundleStyle]);
+  }, [playerLevel, enemyTier, rewardType, rarity, rewardSource, rewardTheme, bundleStyle, prepNotes, variationSeed]);
 
   function buildPayload() {
     return {
@@ -401,6 +436,7 @@ export default function LootScreen() {
       rewardTheme,
       bundleStyle,
       prepNotes,
+      variationSeed,
       result,
     };
   }
@@ -788,6 +824,9 @@ export default function LootScreen() {
           placeholder="Boss cache, faction-issued reward, reward tied to blacksmith upgrade path..."
           multiline
         />
+        <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
+          <Label style={styles.secondaryButtonText}>Reroll Reward Flavor</Label>
+        </Pressable>
 
         <View style={styles.saveRow}>
           <View style={styles.actionRow}>
@@ -858,6 +897,8 @@ export default function LootScreen() {
         <View style={styles.resultRow}>
           <BodyText>{result.rewardSummary}</BodyText>
           <BodyText>Featured item: {result.itemName}</BodyText>
+          <BodyText>Item detail: {result.itemDetail.description}</BodyText>
+          <BodyText>Stat block: {result.itemDetail.statLine}</BodyText>
           <BodyText>Bonus add-on: {result.bonusItem}</BodyText>
           <BodyText>Gold value: {result.goldAmount}</BodyText>
         </View>
@@ -874,6 +915,15 @@ export default function LootScreen() {
         <Label>Practical Reward Advice</Label>
         <View style={styles.resultRow}>
           {result.practicalAdvice.map((entry, index) => (
+            <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+          ))}
+        </View>
+      </Card>
+
+      <Card>
+        <Label>Encounter Hook Ideas</Label>
+        <View style={styles.resultRow}>
+          {result.encounterHooks.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
