@@ -12,6 +12,7 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { buildSeed, pickManyFromPool } from '@/lib/generation';
 
 type Difficulty = 'easy' | 'standard' | 'hard' | 'deadly';
 type EnemyRole = 'brute' | 'skirmisher' | 'controller' | 'artillery' | 'boss';
@@ -58,6 +59,7 @@ export default function EncounterScreen() {
   const [strikerCount, setStrikerCount] = useState('1');
 
   const [encounterNotes, setEncounterNotes] = useState('');
+  const [variationSeed, setVariationSeed] = useState(0);
 
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
@@ -379,10 +381,53 @@ export default function EncounterScreen() {
     if (parsedSupport === 0) {
       recommendations.push('Parties without support can struggle in attrition fights. Consider reducing wave pressure or hazards.');
     }
+    if (parsedFrontline === 0) {
+      recommendations.push('No frontline can make enemy focus fire brutal. Consider more cover or objective-based win conditions.');
+    }
+    if (parsedControl >= 2 && terrainType === 'chokepoint') {
+      recommendations.push('Heavy control with chokepoints can lock players out; keep at least one tactical bypass available.');
+    }
+    if (difficulty === 'deadly' && parsedWaveCount >= 3) {
+      recommendations.push('Deadly multi-wave setups need telegraphed escalation so defeats feel fair rather than abrupt.');
+    }
 
     if (recommendations.length === 0) {
       recommendations.push('This setup is broadly playable. Tune enemy damage or terrain for final feel.');
     }
+
+    const seed = buildSeed(
+      [
+        parsedPartyLevel,
+        parsedPartySize,
+        parsedEnemyCount,
+        parsedEnemyLevel,
+        difficulty,
+        enemyRole,
+        terrainType,
+        parsedWaveCount,
+        encounterNotes.trim(),
+        variationSeed,
+      ].join('|')
+    );
+
+    const tacticalBeats = pickManyFromPool(
+      [
+        'Enemy reinforcements arrive when a battlefield objective is touched.',
+        'A destructible cover piece can be used by either side for advantage.',
+        'The objective moves mid-fight, forcing both teams to reposition.',
+        'The party can disable one major hazard with a skill challenge.',
+        'A neutral creature can be convinced to intervene for one round.',
+        'Retreat lanes open after round three, creating a split decision.',
+        'An enemy lieutenant retreats to trigger traps in a fallback zone.',
+        'A weather shift alters visibility and ranged pressure mid-fight.',
+        'A civilian or relic target appears in danger and changes priorities.',
+        'Victory requires securing two map points rather than only defeating foes.',
+        'One enemy unit can be turned by dialogue if isolated from the commander.',
+        'Each wave arrives with a new terrain constraint and tactical opportunity.',
+      ],
+      2,
+      seed + 13
+    );
 
     return {
       partyBudgetBase,
@@ -395,6 +440,7 @@ export default function EncounterScreen() {
       actionEconomyWarning,
       bossSupportRecommendation,
       recommendations,
+      tacticalBeats,
     };
   }, [
     partyLevel,
@@ -409,6 +455,8 @@ export default function EncounterScreen() {
     supportCount,
     controlCount,
     strikerCount,
+    encounterNotes,
+    variationSeed,
   ]);
 
   function buildPayload() {
@@ -426,6 +474,7 @@ export default function EncounterScreen() {
       controlCount: Number.parseInt(controlCount || '0', 10),
       strikerCount: Number.parseInt(strikerCount || '0', 10),
       encounterNotes,
+      variationSeed,
       result,
     };
   }
@@ -824,6 +873,9 @@ export default function EncounterScreen() {
           placeholder="Boss opens with roar, reinforcements on turn 3, ritual hazard in center..."
           multiline
         />
+        <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
+          <Label style={styles.secondaryButtonText}>Reroll Encounter Beats</Label>
+        </Pressable>
 
         <View style={styles.saveRow}>
           <View style={styles.actionRow}>
@@ -911,6 +963,15 @@ export default function EncounterScreen() {
         <Label>Builder Notes</Label>
         <View style={styles.resultRow}>
           {result.recommendations.map((entry, index) => (
+            <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+          ))}
+        </View>
+      </Card>
+
+      <Card>
+        <Label>Tactical Beat Ideas</Label>
+        <View style={styles.resultRow}>
+          {result.tacticalBeats.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>

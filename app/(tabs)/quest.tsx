@@ -12,6 +12,7 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { buildSeed, pickFromPool, pickManyFromPool } from '@/lib/generation';
 
 type QuestTone = 'heroic' | 'grim' | 'mystic' | 'political';
 type QuestScope = 'personal' | 'local' | 'regional' | 'faction';
@@ -55,6 +56,7 @@ export default function QuestScreen() {
     const [resolutionStyle, setResolutionStyle] = useState<ResolutionStyle>('choice-driven');
     const [factionImpact, setFactionImpact] = useState<FactionImpact>('moderate');
     const [questNotes, setQuestNotes] = useState('');
+    const [variationSeed, setVariationSeed] = useState(0);
 
     const [loadingProject, setLoadingProject] = useState(false);
     const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
@@ -277,21 +279,33 @@ export default function QuestScreen() {
                 'The presumed victim willingly disappeared to protect someone else.',
                 'The enemy is trying to stop a worse threat from emerging.',
                 'Success requires saving both the target and the supposed villain.',
+                'A celebrated hero fabricated evidence to force action.',
+                'The “monster” is the last guardian of an endangered settlement.',
+                'The patron’s true request is mercy, not vengeance.',
             ],
             grim: [
                 'The reward is funded by an atrocity the patron hopes you never learn.',
                 'The missing person caused the disaster and is hiding it.',
                 'Victory demands sacrificing an ally, reputation, or future resource.',
+                'A trusted contact has been coerced and now works against the party.',
+                'The mission succeeds only if one district is abandoned to its fate.',
+                'The guilty party is already dead; the cover-up is still alive.',
             ],
             mystic: [
                 'The relic is sentient and has chosen the wrong bearer.',
                 'The location exists in two states at once and the party must choose one.',
                 'An omen reveals the patron has been guided by a false divine sign.',
+                'Each use of magic rewrites one remembered detail of the mission.',
+                'A celestial and infernal witness both claim jurisdiction over the objective.',
+                'The quest target is a living seal that cannot be moved safely.',
             ],
             political: [
                 'The public reason for the mission is a cover for a power reshuffle.',
                 'A rival faction wants the same outcome, but for opposite reasons.',
                 'Evidence exists that could collapse a treaty if exposed.',
+                'The mission contract has conflicting clauses written by different sponsors.',
+                'A neutral guild can end the conflict but demands a public scapegoat.',
+                'Winning quietly strengthens a tyrant; winning loudly starts a rebellion.',
             ],
         };
 
@@ -300,21 +314,33 @@ export default function QuestScreen() {
                 'The objective is protected by a force stronger than expected.',
                 'The battlefield shifts midway, splitting the party or changing lines of attack.',
                 'Defeating the enemy quickly risks destroying the very thing the party came to recover.',
+                'The enemy commander can call a duel that pauses lesser combatants.',
+                'The arena has rotating hazards that activate every other round.',
+                'Killing the leader ends the fight but voids key intelligence.',
             ],
             diplomacy: [
                 'The opposing side will negotiate, but only if a painful truth is admitted first.',
                 'An ally undermines talks by pushing for vengeance.',
                 'The party must convince two enemies at once, each with incompatible demands.',
+                'A witness can settle the dispute but will only testify in private.',
+                'A deadline forces a ceasefire decision before all evidence is gathered.',
+                'Both sides agree to talks, but each sends a different secret demand.',
             ],
             stealth: [
                 'The target location has layered watch rotations and magical detection.',
                 'An informant provides an entry point, but their loyalty is questionable.',
                 'Remaining unseen becomes harder once the objective is moved unexpectedly.',
+                'The party must choose between silent progress and rescuing prisoners.',
+                'A false alarm elsewhere creates an opening that closes quickly.',
+                'The extraction route is trapped and only partially mapped.',
             ],
             'choice-driven': [
                 'Every path forward saves one group while exposing another to danger.',
                 'A secret changes who truly deserves the reward or blame.',
                 'The easiest solution strengthens the wrong faction long term.',
+                'A rival offers help that guarantees success but creates a future debt.',
+                'The best tactical choice conflicts with the party’s stated values.',
+                'A promised reward can only be claimed by betraying an ally.',
             ],
         };
 
@@ -323,16 +349,22 @@ export default function QuestScreen() {
                 'temporary goodwill with a local contact',
                 'modest pay and a useful rumor',
                 'safe access to a small restricted area',
+                'priority support from a neighborhood militia',
+                'discounted supplies from local merchants',
             ],
             moderate: [
                 'faction influence and a named ally',
                 'a rare cache of resources or equipment',
                 'political leverage over a recurring NPC or group',
+                'formal writs granting travel and operating authority',
+                'an oath-bound specialist assigned for one future mission',
             ],
             major: [
                 'control of a strategic route, asset, or stronghold',
                 'a powerful relic or binding oath from a major figure',
                 'lasting faction realignment in the campaign world',
+                'long-term command over a regional logistics network',
+                'a permanent seat at a ruling council or war table',
             ],
         };
 
@@ -341,16 +373,22 @@ export default function QuestScreen() {
                 'a neighborhood or outpost changes hands quietly',
                 'a trusted NPC loses standing',
                 'future prices or access shift slightly',
+                'local rumors distort the party’s role in the outcome',
+                'a minor rival begins actively undermining the party',
             ],
             moderate: [
                 'a faction gains or loses public legitimacy',
                 'regional patrols, laws, or recruitment begin to shift',
                 'an allied group becomes dependent on the party’s choices',
+                'smuggling routes open or close based on the party’s decision',
+                'neutral towns demand formal guarantees before cooperation',
             ],
             major: [
                 'war accelerates or a truce becomes possible',
                 'a major faction fractures internally',
                 'the campaign map changes in a visible and lasting way',
+                'a successor power emerges and rewrites standing alliances',
+                'refugee flows reshape economies and military priorities',
             ],
         };
 
@@ -361,16 +399,14 @@ export default function QuestScreen() {
             'choice-driven': 'There is no perfect route; the “best” ending depends on who the party chooses to protect.',
         };
 
-        const questSeed = `${factionName}|${objectiveSeed}|${tone}|${scope}|${structure}|${resolutionStyle}|${factionImpact}`;
-        let seedValue = 0;
-        for (let i = 0; i < questSeed.length; i += 1) {
-            seedValue += questSeed.charCodeAt(i);
-        }
+        const seedValue = buildSeed(
+            `${factionName}|${objectiveSeed}|${tone}|${scope}|${structure}|${resolutionStyle}|${factionImpact}|${questNotes}|${variationSeed}`
+        );
 
-        const twist = twists[tone][seedValue % twists[tone].length];
-        const complication = complications[resolutionStyle][seedValue % complications[resolutionStyle].length];
-        const reward = rewardsByImpact[factionImpact][seedValue % rewardsByImpact[factionImpact].length];
-        const consequence = consequencesByImpact[factionImpact][seedValue % consequencesByImpact[factionImpact].length];
+        const twist = pickFromPool(twists[tone], seedValue, 5);
+        const complication = pickFromPool(complications[resolutionStyle], seedValue, 11);
+        const reward = pickFromPool(rewardsByImpact[factionImpact], seedValue, 17);
+        const consequence = pickFromPool(consequencesByImpact[factionImpact], seedValue, 23);
 
         const hook = `${toneHooks[tone]} ${scopeHooks[scope]}`;
         const objective = `${factionName} needs someone to ${objectiveSeed.toLowerCase()}.`;
@@ -405,8 +441,24 @@ export default function QuestScreen() {
             alternateResolution: altResolution[resolutionStyle],
             factionPressure,
             questArc,
+            sceneIdeas: pickManyFromPool(
+                [
+                    'An NPC ally asks for a side favor that complicates timing.',
+                    'A neutral party offers assistance in exchange for a future debt.',
+                    'Evidence appears that reframes who initiated the conflict.',
+                    'A countdown event forces the party to split their priorities.',
+                    'A moral witness observes the party and later reports on their actions.',
+                    'A secondary objective can secure a stronger ending if completed in time.',
+                    'A trusted map is outdated because borders changed since it was made.',
+                    'A celebration scene hides a covert exchange relevant to the main quest.',
+                    'A wounded enemy offers a bargain that reveals hidden command structure.',
+                    'The party finds proof that an earlier side quest was connected all along.',
+                ],
+                2,
+                seedValue + 31
+            ),
         };
-    }, [factionName, objectiveSeed, tone, scope, structure, resolutionStyle, factionImpact]);
+    }, [factionName, objectiveSeed, tone, scope, structure, resolutionStyle, factionImpact, questNotes, variationSeed]);
 
     function buildPayload() {
         return {
@@ -418,6 +470,7 @@ export default function QuestScreen() {
             resolutionStyle,
             factionImpact,
             questNotes,
+            variationSeed,
             result,
         };
     }
@@ -803,6 +856,9 @@ export default function QuestScreen() {
                     placeholder="Important NPC, reveal in act 2, clue hidden in chapel, consequence if players refuse..."
                     multiline
                 />
+                <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
+                    <Label style={styles.secondaryButtonText}>Reroll Quest Beats</Label>
+                </Pressable>
 
                 <View style={styles.saveRow}>
                     <View style={styles.actionRow}>
@@ -898,6 +954,15 @@ export default function QuestScreen() {
                 <Label>{structure === 'one-shot' ? 'Quest Flow' : 'Quest Arc'}</Label>
                 <View style={styles.resultRow}>
                     {result.questArc.map((entry, index) => (
+                        <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+                    ))}
+                </View>
+            </Card>
+
+            <Card>
+                <Label>Scene Ideas</Label>
+                <View style={styles.resultRow}>
+                    {result.sceneIdeas.map((entry, index) => (
                         <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
                     ))}
                 </View>
