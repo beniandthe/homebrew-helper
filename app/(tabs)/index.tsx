@@ -13,7 +13,16 @@ export default function HomeScreen() {
   const maxFreeSaves = 3;
 
   function goTo(
-    path: '/campaign' | '/xp' | '/encounters' | '/generator' | '/quest' | '/projects' | '/pricing' | '/privacy-policy',
+    path:
+      | '/campaign'
+      | '/xp'
+      | '/encounters'
+      | '/generator'
+      | '/quest'
+      | '/projects'
+      | '/pricing'
+      | '/privacy-policy'
+      | '/terms-of-service',
   ) {
     router.push(path);
   }
@@ -153,6 +162,9 @@ export default function HomeScreen() {
           <Pressable onPress={() => goTo('/privacy-policy')}>
             <BodyText style={styles.footerLink}>Privacy Policy</BodyText>
           </Pressable>
+          <Pressable onPress={() => goTo('/terms-of-service')}>
+            <BodyText style={styles.footerLink}>Terms of Service</BodyText>
+          </Pressable>
         </View>
       </ScrollView>
     </Screen>
@@ -268,6 +280,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     alignItems: 'center',
+    gap: 4,
     marginTop: Spacing.sm,
   },
   footerLink: {
