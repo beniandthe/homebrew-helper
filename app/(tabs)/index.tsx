@@ -12,7 +12,9 @@ export default function HomeScreen() {
 
   const maxFreeSaves = 3;
 
-  function goTo(path: '/campaign' | '/xp' | '/encounters' | '/generator' | '/quest' | '/projects' | '/pricing') {
+  function goTo(
+    path: '/campaign' | '/xp' | '/encounters' | '/generator' | '/quest' | '/projects' | '/pricing' | '/privacy-policy',
+  ) {
     router.push(path);
   }
 
@@ -146,6 +148,12 @@ export default function HomeScreen() {
             </BodyText>
           </Card>
         )}
+
+        <View style={styles.footer}>
+          <Pressable onPress={() => goTo('/privacy-policy')}>
+            <BodyText style={styles.footerLink}>Privacy Policy</BodyText>
+          </Pressable>
+        </View>
       </ScrollView>
     </Screen>
   );
@@ -257,5 +265,13 @@ const styles = StyleSheet.create({
   },
   upgradeButtonText: {
     color: '#6d28d9',
+  },
+  footer: {
+    alignItems: 'center',
+    marginTop: Spacing.sm,
+  },
+  footerLink: {
+    fontSize: 13,
+    textDecorationLine: 'underline',
   },
 });

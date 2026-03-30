@@ -17,6 +17,7 @@ export default function RootLayout() {
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="project-roadmap" options={{ title: 'Project Roadmap' }} />
+        <Stack.Screen name="privacy-policy" options={{ title: 'Privacy Policy' }} />
       </Stack>
     </AppStateProvider>
   );
