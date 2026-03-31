@@ -402,11 +402,17 @@ export default function PricingScreen() {
                 </Card>
 
                 <View style={styles.footerActions}>
-                    <Pressable style={styles.linkButton} onPress={() => router.push('/(tabs)/account')}>
-                        <Label>Go to Account</Label>
-                    </Pressable>
+                    <Pressable
+                        style={styles.linkButton}
+                        onPress={() => {
+                            if (router.canGoBack()) {
+                                router.back();
+                                return;
+                            }
 
-                    <Pressable style={styles.linkButton} onPress={() => router.back()}>
+                            router.push('/');
+                        }}
+                    >
                         <Label>Back</Label>
                     </Pressable>
                 </View>
