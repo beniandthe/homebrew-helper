@@ -1,4 +1,5 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, Platform } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 
 import { supabase } from '@/lib/supabase';
@@ -10,7 +11,7 @@ type AppStateContextValue = {
     isPro: boolean;
     savedProjectCount: number;
     loading: boolean;
-    refreshAppState: () => Promise<void>;
+    refreshAppState: (options?: { silent?: boolean }) => Promise<void>;
 };
 
 const AppStateContext = createContext<AppStateContextValue | undefined>(undefined);
@@ -21,48 +22,66 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const [savedProjectCount, setSavedProjectCount] = useState(0);
     const [loading, setLoading] = useState(true);
 
-    const refreshAppState = useCallback(async () => {
-        if (!supabase) {
-            setSession(null);
-            setIsPro(false);
-            setSavedProjectCount(0);
-            setLoading(false);
-            return;
+    const refreshInFlightRef = useRef<Promise<void> | null>(null);
+
+    const refreshAppState = useCallback(async (options?: { silent?: boolean }) => {
+        if (refreshInFlightRef.current) {
+            return refreshInFlightRef.current;
         }
 
-        try {
-            setLoading(true);
-
-            const {
-                data: { session: nextSession },
-            } = await supabase.auth.getSession();
-
-            setSession(nextSession ?? null);
-
-            const nextUserId = nextSession?.user?.id ?? null;
-
-            if (!nextUserId) {
+        const runRefresh = async () => {
+            if (!supabase) {
+                setSession(null);
                 setIsPro(false);
                 setSavedProjectCount(0);
+                setLoading(false);
                 return;
             }
 
-            const [{ data: profileData }, { count }] = await Promise.all([
-                supabase
-                    .from('profiles')
-                    .select('is_pro')
-                    .eq('id', nextUserId)
-                    .maybeSingle(),
-                supabase
-                    .from('saved_projects')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('user_id', nextUserId),
-            ]);
+            try {
+                if (!options?.silent) {
+                    setLoading(true);
+                }
 
-            setIsPro(Boolean(profileData?.is_pro));
-            setSavedProjectCount(count ?? 0);
+                const {
+                    data: { session: nextSession },
+                } = await supabase.auth.getSession();
+
+                setSession(nextSession ?? null);
+
+                const nextUserId = nextSession?.user?.id ?? null;
+
+                if (!nextUserId) {
+                    setIsPro(false);
+                    setSavedProjectCount(0);
+                    return;
+                }
+
+                const [{ data: profileData }, { count }] = await Promise.all([
+                    supabase
+                        .from('profiles')
+                        .select('is_pro')
+                        .eq('id', nextUserId)
+                        .maybeSingle(),
+                    supabase
+                        .from('saved_projects')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('user_id', nextUserId),
+                ]);
+
+                setIsPro(Boolean(profileData?.is_pro));
+                setSavedProjectCount(count ?? 0);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        refreshInFlightRef.current = runRefresh();
+
+        try {
+            await refreshInFlightRef.current;
         } finally {
-            setLoading(false);
+            refreshInFlightRef.current = null;
         }
     }, []);
 
@@ -79,6 +98,65 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
         return () => {
             subscription.unsubscribe();
+        };
+    }, [refreshAppState]);
+
+    useEffect(() => {
+        if (!supabase || !session?.user?.id) return;
+
+        const client = supabase;
+        const userId = session.user.id;
+        const channel = client
+            .channel(`app-state-${userId}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'saved_projects', filter: `user_id=eq.${userId}` },
+                () => {
+                    refreshAppState({ silent: true });
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
+                () => {
+                    refreshAppState({ silent: true });
+                }
+            )
+            .subscribe();
+
+        return () => {
+            client.removeChannel(channel);
+        };
+    }, [session?.user?.id, refreshAppState]);
+
+    useEffect(() => {
+        const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+            if (nextState === 'active') {
+                refreshAppState({ silent: true });
+            }
+        });
+
+        if (Platform.OS !== 'web') {
+            return () => {
+                appStateSubscription.remove();
+            };
+        }
+
+        const onFocus = () => {
+            refreshAppState({ silent: true });
+        };
+        const onStorage = (event: StorageEvent) => {
+            if (!event.key || !event.key.includes('supabase.auth')) return;
+            refreshAppState({ silent: true });
+        };
+
+        window.addEventListener('focus', onFocus);
+        window.addEventListener('storage', onStorage);
+
+        return () => {
+            window.removeEventListener('focus', onFocus);
+            window.removeEventListener('storage', onStorage);
+            appStateSubscription.remove();
         };
     }, [refreshAppState]);
 
