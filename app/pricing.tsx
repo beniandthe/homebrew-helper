@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAppState } from '@/contexts/AppStateContext';
 import { BodyText, Heading, Label } from '@/components/AppText';
@@ -49,7 +50,7 @@ export default function PricingScreen() {
         setStatusBanner({ variant, title, message });
     }
 
-    async function loadBillingState(nextUserId: string) {
+    const loadBillingState = useCallback(async (nextUserId: string) => {
         if (!supabase) return;
 
         try {
@@ -72,7 +73,7 @@ export default function PricingScreen() {
         } finally {
             setLoadingBillingState(false);
         }
-    }
+    }, []);
 
     useEffect(() => {
         if (!userId || !isSignedIn) {
@@ -83,7 +84,7 @@ export default function PricingScreen() {
         }
 
         loadBillingState(userId);
-    }, [userId, isSignedIn, isPro]);
+    }, [userId, isSignedIn, isPro, loadBillingState]);
 
     useEffect(() => {
         if (params.checkout === 'success') {
@@ -92,7 +93,7 @@ export default function PricingScreen() {
                 'Purchase completed',
                 'Your Pro access is active on this account.'
             );
-            refreshAppState();
+            refreshAppState({ silent: true });
             if (userId) {
                 loadBillingState(userId);
             }
@@ -105,7 +106,16 @@ export default function PricingScreen() {
                 'Your subscription was not changed.'
             );
         }
-    }, [params.checkout, refreshAppState, userId]);
+    }, [params.checkout, refreshAppState, userId, loadBillingState]);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!userId || !isSignedIn) return;
+
+            refreshAppState({ silent: true });
+            loadBillingState(userId);
+        }, [userId, isSignedIn, refreshAppState, loadBillingState])
+    );
 
     async function handleUpgradePress() {
         if (!supabase) {

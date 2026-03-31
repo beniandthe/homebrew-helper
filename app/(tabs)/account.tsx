@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, AppState, Pressable, StyleSheet, View } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAppState } from '@/contexts/AppStateContext';
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Heading, Label } from '@/components/AppText';
@@ -43,7 +44,7 @@ export default function AccountScreen() {
   const userId = session?.user?.id ?? null;
   const { refreshAppState } = useAppState();
 
-  async function loadPlan(nextUserId: string) {
+  const loadPlan = useCallback(async (nextUserId: string) => {
     if (!supabase) return;
 
     try {
@@ -66,7 +67,7 @@ export default function AccountScreen() {
     } finally {
       setLoadingPlan(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     if (!supabase) {
@@ -114,7 +115,59 @@ export default function AccountScreen() {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [loadPlan]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return;
+
+      refreshAppState({ silent: true });
+      loadPlan(userId);
+    }, [userId, loadPlan, refreshAppState])
+  );
+
+  useEffect(() => {
+    if (!supabase || !userId) return;
+
+    const client = supabase;
+    const channel = client
+      .channel(`account-profile-${userId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
+        () => {
+          refreshAppState({ silent: true });
+          loadPlan(userId);
+        }
+      )
+      .subscribe();
+
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') return;
+      refreshAppState({ silent: true });
+      loadPlan(userId);
+    });
+
+    if (typeof window === 'undefined') {
+      return () => {
+        client.removeChannel(channel);
+        appStateSubscription.remove();
+      };
+    }
+
+    const onFocus = () => {
+      refreshAppState({ silent: true });
+      loadPlan(userId);
+    };
+
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      client.removeChannel(channel);
+      appStateSubscription.remove();
+    };
+  }, [userId, loadPlan, refreshAppState]);
 
   async function handleSignUp() {
     if (!supabase) return;
