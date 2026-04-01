@@ -130,6 +130,26 @@ export default function ProjectsScreen() {
     }
   }, [loadingSession, loadProjects]);
 
+  useEffect(() => {
+    if (!supabase || !userId) return;
+
+    const client = supabase;
+    const channel = client
+      .channel(`projects-${userId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'saved_projects', filter: `user_id=eq.${userId}` },
+        () => {
+          loadProjects();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      client.removeChannel(channel);
+    };
+  }, [userId, loadProjects]);
+
   function handleStartRename(projectId: string, currentName: string) {
     setRenamingId(projectId);
     setRenameValue(currentName);
