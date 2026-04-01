@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAppState } from '@/contexts/AppStateContext';
 import { BodyText, Heading, Label } from '@/components/AppText';
@@ -25,6 +26,7 @@ function formatPlanDate(value: string | null) {
 }
 
 export default function PricingScreen() {
+    const RECOVERY_TIMEOUT_MS = 12000;
     const [busy, setBusy] = useState(false);
     const [loadingBillingState, setLoadingBillingState] = useState(false);
     const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false);
@@ -49,7 +51,7 @@ export default function PricingScreen() {
         setStatusBanner({ variant, title, message });
     }
 
-    async function loadBillingState(nextUserId: string) {
+    const loadBillingState = useCallback(async (nextUserId: string) => {
         if (!supabase) return;
 
         try {
@@ -72,7 +74,7 @@ export default function PricingScreen() {
         } finally {
             setLoadingBillingState(false);
         }
-    }
+    }, []);
 
     useEffect(() => {
         if (!userId || !isSignedIn) {
@@ -83,7 +85,7 @@ export default function PricingScreen() {
         }
 
         loadBillingState(userId);
-    }, [userId, isSignedIn, isPro]);
+    }, [userId, isSignedIn, isPro, loadBillingState]);
 
     useEffect(() => {
         if (params.checkout === 'success') {
@@ -92,7 +94,7 @@ export default function PricingScreen() {
                 'Purchase completed',
                 'Your Pro access is active on this account.'
             );
-            refreshAppState();
+            refreshAppState({ silent: true });
             if (userId) {
                 loadBillingState(userId);
             }
@@ -105,7 +107,83 @@ export default function PricingScreen() {
                 'Your subscription was not changed.'
             );
         }
-    }, [params.checkout, refreshAppState, userId]);
+    }, [params.checkout, refreshAppState, userId, loadBillingState]);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!userId || !isSignedIn) return;
+
+            refreshAppState({ silent: true });
+            loadBillingState(userId);
+        }, [userId, isSignedIn, refreshAppState, loadBillingState])
+    );
+
+    useEffect(() => {
+        const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+            if (nextState !== 'active') return;
+            setBusy(false);
+            setLoadingBillingState(false);
+
+            if (!userId || !isSignedIn) return;
+            refreshAppState({ silent: true });
+            loadBillingState(userId);
+        });
+
+        if (Platform.OS !== 'web' || typeof window === 'undefined') {
+            return () => {
+                appStateSubscription.remove();
+            };
+        }
+
+        const syncAfterReturn = () => {
+            setBusy(false);
+            setLoadingBillingState(false);
+
+            if (!userId || !isSignedIn) return;
+            refreshAppState({ silent: true });
+            loadBillingState(userId);
+        };
+
+        const onVisibilityChange = () => {
+            if (document.visibilityState !== 'visible') return;
+            syncAfterReturn();
+        };
+
+        window.addEventListener('focus', syncAfterReturn);
+        window.addEventListener('pageshow', syncAfterReturn);
+        document.addEventListener('visibilitychange', onVisibilityChange);
+
+        return () => {
+            appStateSubscription.remove();
+            window.removeEventListener('focus', syncAfterReturn);
+            window.removeEventListener('pageshow', syncAfterReturn);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+        };
+    }, [isSignedIn, userId, refreshAppState, loadBillingState]);
+
+    useEffect(() => {
+        if (!busy && !loadingBillingState) return;
+
+        const timeout = setTimeout(() => {
+            setBusy(false);
+            setLoadingBillingState(false);
+
+            if (userId && isSignedIn) {
+                refreshAppState({ silent: true });
+                loadBillingState(userId);
+            }
+
+            setBanner(
+                'info',
+                'Still syncing',
+                'Billing is taking longer than expected. We retried your account sync.'
+            );
+        }, RECOVERY_TIMEOUT_MS);
+
+        return () => {
+            clearTimeout(timeout);
+        };
+    }, [busy, loadingBillingState, userId, isSignedIn, refreshAppState, loadBillingState]);
 
     async function handleUpgradePress() {
         if (!supabase) {
