@@ -9,6 +9,7 @@ import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
+import { hasActiveProAccess } from '@/lib/billing';
 
 function formatPlanDate(value: string | null) {
   if (!value) return null;
@@ -62,9 +63,10 @@ export default function AccountScreen() {
         return;
       }
 
-      setIsPro(Boolean(data?.is_pro));
-      setCancelAtPeriodEnd(Boolean(data?.cancel_at_period_end));
-      setCurrentPeriodEnd(data?.current_period_end ?? null);
+      const nextProfile = data ?? null;
+      setIsPro(hasActiveProAccess(nextProfile));
+      setCancelAtPeriodEnd(Boolean(nextProfile?.cancel_at_period_end));
+      setCurrentPeriodEnd(nextProfile?.current_period_end ?? null);
     } finally {
       setLoadingPlan(false);
     }
