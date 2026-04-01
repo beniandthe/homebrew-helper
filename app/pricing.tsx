@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAppState } from '@/contexts/AppStateContext';
 import { BodyText, Heading, Label } from '@/components/AppText';
@@ -8,6 +9,7 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { hasActiveProAccess } from '@/lib/billing';
 
 
 function formatPlanDate(value: string | null) {
@@ -25,6 +27,7 @@ function formatPlanDate(value: string | null) {
 }
 
 export default function PricingScreen() {
+    const RECOVERY_TIMEOUT_MS = 12000;
     const [busy, setBusy] = useState(false);
     const [loadingBillingState, setLoadingBillingState] = useState(false);
     const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false);
@@ -49,7 +52,7 @@ export default function PricingScreen() {
         setStatusBanner({ variant, title, message });
     }
 
-    async function loadBillingState(nextUserId: string) {
+    const loadBillingState = useCallback(async (nextUserId: string) => {
         if (!supabase) return;
 
         try {
@@ -66,13 +69,14 @@ export default function PricingScreen() {
                 return;
             }
 
-            setCancelAtPeriodEnd(Boolean(data?.cancel_at_period_end));
-            setCurrentPeriodEnd(data?.current_period_end ?? null);
-            setCanceledAt(data?.canceled_at ?? null);
+            const nextProfile = data ?? null;
+            setCancelAtPeriodEnd(Boolean(nextProfile?.cancel_at_period_end));
+            setCurrentPeriodEnd(nextProfile?.current_period_end ?? null);
+            setCanceledAt(nextProfile?.canceled_at ?? null);
         } finally {
             setLoadingBillingState(false);
         }
-    }
+    }, []);
 
     useEffect(() => {
         if (!userId || !isSignedIn) {
@@ -83,7 +87,7 @@ export default function PricingScreen() {
         }
 
         loadBillingState(userId);
-    }, [userId, isSignedIn, isPro]);
+    }, [userId, isSignedIn, isPro, loadBillingState]);
 
     useEffect(() => {
         if (params.checkout === 'success') {
@@ -92,7 +96,7 @@ export default function PricingScreen() {
                 'Purchase completed',
                 'Your Pro access is active on this account.'
             );
-            refreshAppState();
+            refreshAppState({ silent: true });
             if (userId) {
                 loadBillingState(userId);
             }
@@ -105,7 +109,83 @@ export default function PricingScreen() {
                 'Your subscription was not changed.'
             );
         }
-    }, [params.checkout, refreshAppState, userId]);
+    }, [params.checkout, refreshAppState, userId, loadBillingState]);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!userId || !isSignedIn) return;
+
+            refreshAppState({ silent: true });
+            loadBillingState(userId);
+        }, [userId, isSignedIn, refreshAppState, loadBillingState])
+    );
+
+    useEffect(() => {
+        const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+            if (nextState !== 'active') return;
+            setBusy(false);
+            setLoadingBillingState(false);
+
+            if (!userId || !isSignedIn) return;
+            refreshAppState({ silent: true });
+            loadBillingState(userId);
+        });
+
+        if (Platform.OS !== 'web' || typeof window === 'undefined') {
+            return () => {
+                appStateSubscription.remove();
+            };
+        }
+
+        const syncAfterReturn = () => {
+            setBusy(false);
+            setLoadingBillingState(false);
+
+            if (!userId || !isSignedIn) return;
+            refreshAppState({ silent: true });
+            loadBillingState(userId);
+        };
+
+        const onVisibilityChange = () => {
+            if (document.visibilityState !== 'visible') return;
+            syncAfterReturn();
+        };
+
+        window.addEventListener('focus', syncAfterReturn);
+        window.addEventListener('pageshow', syncAfterReturn);
+        document.addEventListener('visibilitychange', onVisibilityChange);
+
+        return () => {
+            appStateSubscription.remove();
+            window.removeEventListener('focus', syncAfterReturn);
+            window.removeEventListener('pageshow', syncAfterReturn);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+        };
+    }, [isSignedIn, userId, refreshAppState, loadBillingState]);
+
+    useEffect(() => {
+        if (!busy && !loadingBillingState) return;
+
+        const timeout = setTimeout(() => {
+            setBusy(false);
+            setLoadingBillingState(false);
+
+            if (userId && isSignedIn) {
+                refreshAppState({ silent: true });
+                loadBillingState(userId);
+            }
+
+            setBanner(
+                'info',
+                'Still syncing',
+                'Billing is taking longer than expected. We retried your account sync.'
+            );
+        }, RECOVERY_TIMEOUT_MS);
+
+        return () => {
+            clearTimeout(timeout);
+        };
+    }, [busy, loadingBillingState, userId, isSignedIn, refreshAppState, loadBillingState]);
 
     async function handleUpgradePress() {
         if (!supabase) {
@@ -118,7 +198,7 @@ export default function PricingScreen() {
             return;
         }
 
-        if (isPro && !cancelAtPeriodEnd) {
+        if (effectivePro && !cancelAtPeriodEnd) {
             setBanner('info', 'Pro already active', 'Your account already has Pro enabled.');
             return;
         }
@@ -166,7 +246,7 @@ export default function PricingScreen() {
             return;
         }
 
-        if (!isPro) {
+        if (!effectivePro) {
             setBanner('info', 'No active Pro plan', 'Upgrade to Pro before managing a subscription.');
             return;
         }
@@ -251,6 +331,13 @@ export default function PricingScreen() {
         }
     }
 
+    const effectivePro = hasActiveProAccess({
+        is_pro: isPro,
+        cancel_at_period_end: cancelAtPeriodEnd,
+        current_period_end: currentPeriodEnd,
+        canceled_at: canceledAt,
+    });
+
     const formattedPeriodEnd = formatPlanDate(currentPeriodEnd);
     const formattedCanceledAt = formatPlanDate(canceledAt);
 
@@ -263,11 +350,11 @@ export default function PricingScreen() {
             return 'Loading plan...';
         }
 
-        if (isPro && cancelAtPeriodEnd && formattedPeriodEnd) {
+        if (effectivePro && cancelAtPeriodEnd && formattedPeriodEnd) {
             return `Pro has been canceled and remains active until ${formattedPeriodEnd}.`;
         }
 
-        if (isPro) {
+        if (effectivePro) {
             return 'Pro is active and renews automatically.';
         }
 
@@ -304,7 +391,7 @@ export default function PricingScreen() {
                         <BodyText>{renderPlanText()}</BodyText>
                     )}
 
-                    {isPro && cancelAtPeriodEnd && formattedCanceledAt ? (
+                    {effectivePro && cancelAtPeriodEnd && formattedCanceledAt ? (
                         <BodyText style={styles.subtleText}>
                             Cancellation was requested on {formattedCanceledAt}.
                         </BodyText>
@@ -316,7 +403,7 @@ export default function PricingScreen() {
 
                     {!isSignedIn ? (
                         <BodyText>Sign in first to manage billing and account access.</BodyText>
-                    ) : isPro ? (
+                    ) : effectivePro ? (
                         <>
                             <BodyText>
                                 {cancelAtPeriodEnd && formattedPeriodEnd

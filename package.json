@@ -9,7 +9,8 @@
     "android": "expo start --android",
     "web": "expo start --web",
     "lint": "expo lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/tests/run-tests.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
