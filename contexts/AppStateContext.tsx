@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState, Platform } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 
+import { hasActiveProAccess } from '@/lib/billing';
 import { supabase } from '@/lib/supabase';
 
 type AppStateContextValue = {
@@ -61,7 +62,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
                 const [{ data: profileData }, { count }] = await Promise.all([
                     supabase
                         .from('profiles')
-                        .select('is_pro')
+                        .select('is_pro, cancel_at_period_end, current_period_end, canceled_at')
                         .eq('id', nextUserId)
                         .maybeSingle(),
                     supabase
@@ -70,7 +71,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
                         .eq('user_id', nextUserId),
                 ]);
 
-                setIsPro(Boolean(profileData?.is_pro));
+                setIsPro(hasActiveProAccess(profileData));
                 setSavedProjectCount(count ?? 0);
             } finally {
                 setLoading(false);

@@ -9,6 +9,7 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { hasActiveProAccess } from '@/lib/billing';
 
 
 function formatPlanDate(value: string | null) {
@@ -68,9 +69,10 @@ export default function PricingScreen() {
                 return;
             }
 
-            setCancelAtPeriodEnd(Boolean(data?.cancel_at_period_end));
-            setCurrentPeriodEnd(data?.current_period_end ?? null);
-            setCanceledAt(data?.canceled_at ?? null);
+            const nextProfile = data ?? null;
+            setCancelAtPeriodEnd(Boolean(nextProfile?.cancel_at_period_end));
+            setCurrentPeriodEnd(nextProfile?.current_period_end ?? null);
+            setCanceledAt(nextProfile?.canceled_at ?? null);
         } finally {
             setLoadingBillingState(false);
         }
@@ -196,7 +198,7 @@ export default function PricingScreen() {
             return;
         }
 
-        if (isPro && !cancelAtPeriodEnd) {
+        if (effectivePro && !cancelAtPeriodEnd) {
             setBanner('info', 'Pro already active', 'Your account already has Pro enabled.');
             return;
         }
@@ -244,7 +246,7 @@ export default function PricingScreen() {
             return;
         }
 
-        if (!isPro) {
+        if (!effectivePro) {
             setBanner('info', 'No active Pro plan', 'Upgrade to Pro before managing a subscription.');
             return;
         }
@@ -329,6 +331,13 @@ export default function PricingScreen() {
         }
     }
 
+    const effectivePro = hasActiveProAccess({
+        is_pro: isPro,
+        cancel_at_period_end: cancelAtPeriodEnd,
+        current_period_end: currentPeriodEnd,
+        canceled_at: canceledAt,
+    });
+
     const formattedPeriodEnd = formatPlanDate(currentPeriodEnd);
     const formattedCanceledAt = formatPlanDate(canceledAt);
 
@@ -341,11 +350,11 @@ export default function PricingScreen() {
             return 'Loading plan...';
         }
 
-        if (isPro && cancelAtPeriodEnd && formattedPeriodEnd) {
+        if (effectivePro && cancelAtPeriodEnd && formattedPeriodEnd) {
             return `Pro has been canceled and remains active until ${formattedPeriodEnd}.`;
         }
 
-        if (isPro) {
+        if (effectivePro) {
             return 'Pro is active and renews automatically.';
         }
 
@@ -382,7 +391,7 @@ export default function PricingScreen() {
                         <BodyText>{renderPlanText()}</BodyText>
                     )}
 
-                    {isPro && cancelAtPeriodEnd && formattedCanceledAt ? (
+                    {effectivePro && cancelAtPeriodEnd && formattedCanceledAt ? (
                         <BodyText style={styles.subtleText}>
                             Cancellation was requested on {formattedCanceledAt}.
                         </BodyText>
@@ -394,7 +403,7 @@ export default function PricingScreen() {
 
                     {!isSignedIn ? (
                         <BodyText>Sign in first to manage billing and account access.</BodyText>
-                    ) : isPro ? (
+                    ) : effectivePro ? (
                         <>
                             <BodyText>
                                 {cancelAtPeriodEnd && formattedPeriodEnd
