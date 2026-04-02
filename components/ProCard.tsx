@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { BodyText, Label } from '@/components/AppText';
 import { Card } from '@/components/Card';
-import { Colors, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 
 type ProCardProps = {
     isPro: boolean;

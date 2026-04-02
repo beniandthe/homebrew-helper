@@ -1,9 +1,37 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import ts from 'typescript';
 
 const repoRoot = process.cwd();
+
+function runTypecheck() {
+  const configPath = ts.findConfigFile(repoRoot, ts.sys.fileExists, 'tsconfig.json');
+  if (!configPath) {
+    throw new Error('Unable to locate tsconfig.json');
+  }
+
+  const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (configFile.error) {
+    throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, '\n'));
+  }
+
+  const parsedConfig = ts.parseJsonConfigFileContent(configFile.config, ts.sys, repoRoot);
+  const program = ts.createProgram(parsedConfig.fileNames, parsedConfig.options);
+  const diagnostics = ts.getPreEmitDiagnostics(program);
+
+  if (diagnostics.length === 0) {
+    return;
+  }
+
+  const formatHost = {
+    getCanonicalFileName: (fileName) => fileName,
+    getCurrentDirectory: () => repoRoot,
+    getNewLine: () => '\n',
+  };
+
+  throw new Error(ts.formatDiagnosticsWithColorAndContext(diagnostics, formatHost));
+}
 
 function read(file) {
   return fs.readFileSync(path.join(repoRoot, file), 'utf8');
@@ -51,7 +79,7 @@ const results = [];
 
 results.push(
   await test('TypeScript compiles without errors', async () => {
-    execSync('npm run typecheck', { stdio: 'pipe' });
+    runTypecheck();
   })
 );
 
@@ -167,6 +195,7 @@ results.push(
 results.push(
   await test('Billing files use shared entitlement helper to avoid state desync', async () => {
     const billing = read('lib/billing.ts');
+    const projectAccess = read('lib/projectAccess.ts');
     const context = read('contexts/AppStateContext.tsx');
     const pricing = read('app/pricing.tsx');
     const account = read('app/(tabs)/account.tsx');
@@ -179,16 +208,19 @@ results.push(
     assert.match(billing, /export function hasActiveProAccess/);
     assert.match(billing, /export function markBillingReturnPending/);
     assert.match(billing, /export function getPendingBillingReturn/);
+    assert.match(projectAccess, /hasActiveProAccess/);
+    assert.match(projectAccess, /export async function fetchLatestSaveAccess/);
     assert.match(context, /hasActiveProAccess/);
     assert.match(context, /getPendingBillingReturn/);
     assert.match(pricing, /hasActiveProAccess/);
     assert.match(pricing, /markBillingReturnPending/);
-    assert.match(account, /hasActiveProAccess/);
-    assert.match(campaign, /hasActiveProAccess/);
-    assert.match(encounters, /hasActiveProAccess/);
-    assert.match(generator, /hasActiveProAccess/);
-    assert.match(quest, /hasActiveProAccess/);
-    assert.match(xp, /hasActiveProAccess/);
+    assert.match(account, /billingProfile/);
+    assert.match(campaign, /fetchLatestSaveAccess/);
+    assert.match(encounters, /fetchLatestSaveAccess/);
+    assert.match(generator, /fetchLatestSaveAccess/);
+    assert.match(quest, /fetchLatestSaveAccess/);
+    assert.match(xp, /fetchLatestSaveAccess/);
+    assert.doesNotMatch(account, /supabase\.auth\.onAuthStateChange/);
     assert.doesNotMatch(campaign, /Boolean\(profileData\?\.is_pro\)/);
     assert.doesNotMatch(encounters, /Boolean\(profileData\?\.is_pro\)/);
     assert.doesNotMatch(generator, /Boolean\(profileData\?\.is_pro\)/);

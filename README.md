@@ -1,26 +1,25 @@
-# RPG Toolkit Starter
+# RPG Toolkit
 
-A lightweight Expo + Expo Router starter for a cross-platform RPG utility app that runs on web and iPhone from one codebase.
+An Expo Router app for web and iPhone that ships RPG prep tools, Supabase-backed accounts and saves, and Stripe-powered web subscriptions.
 
-## Included in this starter
+## Current product surface
 
-- Home/dashboard screen
-- XP Curve Calculator
-- Encounter Budget Calculator
-- Loot Generator
-- Quest/Faction Generator
-- Account screen with Supabase integration stub
-- Roadmap screen for the next monetization steps
-- Supabase schema for user profiles and saved projects
-- EAS build config for App Store/TestFlight workflows
+- XP curve calculator
+- Encounter builder
+- Loot generator
+- Quest/faction generator
+- Campaign Hub for Pro users
+- Supabase auth, profiles, realtime save counts, and saved projects
+- Stripe Checkout + customer portal for web billing
 
 ## Stack
 
-- Expo
+- Expo SDK 55
 - Expo Router
 - React Native + Web
-- Supabase (optional, ready to wire)
-- EAS Build / Submit
+- Supabase Auth, Postgres, Realtime, and Edge Functions
+- Stripe Billing
+- EAS Hosting and EAS Workflows
 
 ## Local setup
 
@@ -28,8 +27,8 @@ A lightweight Expo + Expo Router starter for a cross-platform RPG utility app th
    ```bash
    npm install
    ```
-2. Copy `.env.example` to `.env` and add your Supabase values if you want auth/save support.
-3. Start the project
+2. Copy [.env.example](/C:/Users/rossm/rpg-toolkit-starter/.env.example) to `.env` and fill in the values you need for local development.
+3. Start the app
    ```bash
    npm run web
    ```
@@ -38,47 +37,42 @@ A lightweight Expo + Expo Router starter for a cross-platform RPG utility app th
    npm run ios
    ```
 
-## Security and repository hygiene
+## Quality checks
 
-- `.gitignore` now blocks common secrets and signing artifacts (`.env.*`, certificates, private keys, provisioning profiles, temp/cache folders).
-- Keep secrets in environment variables only; do not commit `.env` files.
-- If you rotate credentials, update your GitHub secrets and Expo secrets immediately.
+- `npm run lint`
+- `npm run typecheck`
+- `npm test`
+- `npm run export:web`
+- `npm run check`
 
-## CI/CD pipelines
+## Deployment
 
-GitHub Actions workflows are included:
+### Web
 
-- **CI (`.github/workflows/ci.yml`)**
-  - Runs on pull requests and pushes to `main`.
-  - Installs dependencies and runs lint/typecheck checks.
-- **CD (`.github/workflows/cd-publish.yml`)**
-  - Runs when a GitHub Release is published (or manually via `workflow_dispatch`).
-  - Re-runs quality checks and publishes an EAS OTA update.
+- EAS Hosting workflows live in [.eas/workflows/deploy.yml](/C:/Users/rossm/rpg-toolkit-starter/.eas/workflows/deploy.yml) and [.eas/workflows/pr-preview.yml](/C:/Users/rossm/rpg-toolkit-starter/.eas/workflows/pr-preview.yml).
+- Expo environment names are pinned in [eas.json](/C:/Users/rossm/rpg-toolkit-starter/eas.json) so build/update/deploy jobs use consistent `development`, `preview`, and `production` environments.
+- After your production site URL changes, update the Supabase `APP_URL` secret so Stripe returns to the right pricing page.
 
-### Required GitHub secret for CD
+### Supabase
 
-Set this repository secret before using the publish workflow:
+- Edge Function deployment settings live in [config.toml](/C:/Users/rossm/rpg-toolkit-starter/supabase/config.toml).
+- Database schema source of truth lives in [schema.sql](/C:/Users/rossm/rpg-toolkit-starter/supabase/schema.sql) and tracked migrations in `supabase/migrations/`.
+- GitHub Actions deploy Supabase changes from [.github/workflows/supabase-deploy.yml](/C:/Users/rossm/rpg-toolkit-starter/.github/workflows/supabase-deploy.yml).
 
-- `EXPO_TOKEN`: Expo access token with permission to publish updates.
+Required GitHub configuration:
 
-## Suggested next implementation steps
+- Secret: `SUPABASE_ACCESS_TOKEN`
+- Secret: `SUPABASE_DB_PASSWORD`
+- Variable: `SUPABASE_PROJECT_REF`
 
-### 1) Save projects
-Create a `useProjects` hook that writes calculator/generator outputs into the `projects` table.
+## Security notes
 
-### 2) Web monetization
-Add a `/pricing` route and wire Stripe Checkout for web-only subscriptions.
+- `.env` files stay untracked.
+- `EXPO_PUBLIC_*` values are client-visible and should never contain secrets.
+- Stripe secret keys, webhook secrets, and the Supabase service-role key belong only in local `.env`, Supabase secrets, or GitHub secrets.
 
-### 3) iPhone monetization
-Add Apple IAP after your core paid features are stable. Keep your paywall logic behind a single `isPro` gate so Stripe and Apple can share the same entitlement checks.
+## Operational notes
 
-### 4) SEO/web growth
-Add route-level metadata and dedicated landing pages such as:
-- `/xp-calculator`
-- `/encounter-builder`
-- `/loot-generator`
-- `/quest-generator`
-
-## Notes
-
-This repo is intentionally simple so you can ship quickly. The formulas and generator content are easy to replace once you validate what users actually want.
+- The app’s Pro entitlement logic is centralized in [billing.ts](/C:/Users/rossm/rpg-toolkit-starter/lib/billing.ts) and [AppStateContext.tsx](/C:/Users/rossm/rpg-toolkit-starter/contexts/AppStateContext.tsx).
+- Stripe webhooks and billing portal redirects are implemented in `supabase/functions/`.
+- `APP_URL` is the server-side source of truth for Stripe return URLs. `EXPO_PUBLIC_APP_URL` is not used by the client.

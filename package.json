@@ -8,9 +8,11 @@
     "ios": "expo start --ios",
     "android": "expo start --android",
     "web": "expo start --web",
-    "lint": "expo lint",
+    "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/tests/run-tests.mjs"
+    "test": "node scripts/tests/run-tests.mjs",
+    "export:web": "expo export --platform web",
+    "check": "npm run lint && npm run typecheck && npm test && npm run export:web"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -20,18 +22,17 @@
     "expo": "~55.0.9",
     "expo-blur": "~55.0.10",
     "expo-constants": "~55.0.7",
+    "expo-font": "~55.0.4",
     "expo-haptics": "~55.0.9",
     "expo-linking": "~55.0.9",
     "expo-router": "~55.0.8",
     "expo-status-bar": "~55.0.4",
-    "expo-font": "~55.0.4",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-native": "0.83.4",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.23.0",
-    "react-native-web": "^0.21.0",
-    "stripe": "^20.4.1"
+    "react-native-web": "^0.21.0"
   },
   "devDependencies": {
     "@babel/core": "^7.26.0",

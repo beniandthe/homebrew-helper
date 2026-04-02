@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAppState } from '@/contexts/AppStateContext';
 import { UpgradeBanner } from '@/components/UpgradeBanner';
@@ -10,8 +10,8 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
-import { hasActiveProAccess } from '@/lib/billing';
 import { buildSeed, pickManyFromPool } from '@/lib/generation';
+import { fetchLatestSaveAccess } from '@/lib/projectAccess';
 
 type CampaignTone = 'heroic' | 'grim' | 'mystic' | 'political' | 'sandbox';
 
@@ -65,14 +65,11 @@ export default function CampaignScreen() {
     const {
         userId: sessionUserId,
         isPro,
-        savedProjectCount,
         loading: loadingSession,
         refreshAppState,
     } = useAppState();
 
     const maxFreeSaves = 3;
-    const isAtFreeLimit = !isPro && savedProjectCount >= maxFreeSaves;
-    const isCreatingNewProject = !currentProjectId;
 
     function setBanner(
         variant: StatusBannerVariant,
@@ -87,33 +84,14 @@ export default function CampaignScreen() {
             return { isPro: false, count: 0 };
         }
 
-        const [{ data: profileData }, { count, error: countError }] = await Promise.all([
-            supabase
-                .from('profiles')
-                .select('is_pro, cancel_at_period_end, current_period_end, canceled_at')
-                .eq('id', userId)
-                .maybeSingle(),
-            supabase
-                .from('saved_projects')
-                .select('*', { count: 'exact', head: true })
-                .eq('user_id', userId),
-        ]);
-
-        if (countError) {
-            throw countError;
-        }
-
-        return {
-            isPro: hasActiveProAccess(profileData),
-            count: count ?? 0,
-        };
+        return fetchLatestSaveAccess(supabase, userId);
     }
 
     function handleUpgradePress() {
         router.push('/pricing');
     }
 
-    async function loadLinkedProjects(campaignId: string) {
+    const loadLinkedProjects = useCallback(async (campaignId: string) => {
         if (!supabase || !sessionUserId) return;
 
         try {
@@ -135,7 +113,7 @@ export default function CampaignScreen() {
         } finally {
             setLoadingLinks(false);
         }
-    }
+    }, [sessionUserId]);
 
     useEffect(() => {
         async function loadProject() {
@@ -200,7 +178,7 @@ export default function CampaignScreen() {
         }
 
         loadProject();
-    }, [params.projectId, sessionUserId, isPro]);
+    }, [params.projectId, sessionUserId, isPro, loadLinkedProjects]);
 
     const campaignSnapshot = useMemo(() => {
         const summary = campaignSummary.trim() || 'No campaign summary written yet.';

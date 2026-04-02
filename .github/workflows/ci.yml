@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint-and-typecheck:
+  quality:
     runs-on: ubuntu-latest
 
     steps:
@@ -29,8 +29,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Full quality check
+        run: npm run check

@@ -26,7 +26,7 @@ export const supabase =
         auth: {
           storage: Platform.OS === 'web' ? webStorage : AsyncStorage,
           autoRefreshToken: Platform.OS !== 'web',
-          persistSession: typeof window !== 'undefined',
+          persistSession: true,
           detectSessionInUrl: Platform.OS === 'web',
         },
       })

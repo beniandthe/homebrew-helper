@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, AppState, Pressable, StyleSheet, View } from 'react-native';
-import type { Session } from '@supabase/supabase-js';
-import { useFocusEffect } from '@react-navigation/native';
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+
 import { useAppState } from '@/contexts/AppStateContext';
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Heading, Label } from '@/components/AppText';
@@ -9,7 +8,6 @@ import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
-import { hasActiveProAccess } from '@/lib/billing';
 
 function formatPlanDate(value: string | null) {
   if (!value) return null;
@@ -26,203 +24,19 @@ function formatPlanDate(value: string | null) {
 }
 
 export default function AccountScreen() {
-  const RECOVERY_TIMEOUT_MS = 12000;
   const configured = Boolean(supabase);
   const enableDevBilling = process.env.EXPO_PUBLIC_ENABLE_DEV_BILLING === 'true';
-  const [session, setSession] = useState<Session | null>(null);
-  const [loadingSession, setLoadingSession] = useState(true);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
-  const [isPro, setIsPro] = useState(false);
-  const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false);
-  const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null);
-  const [loadingPlan, setLoadingPlan] = useState(false);
+  const { session, userId, isSignedIn, isPro, billingProfile, loading, refreshAppState } = useAppState();
 
-  const userEmail = useMemo(() => session?.user?.email ?? '', [session]);
-  const userId = session?.user?.id ?? null;
-  const { refreshAppState } = useAppState();
-
-  const loadPlan = useCallback(async (nextUserId: string) => {
-    if (!supabase) return;
-
-    try {
-      setLoadingPlan(true);
-
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('is_pro, cancel_at_period_end, current_period_end')
-        .eq('id', nextUserId)
-        .maybeSingle();
-
-      if (error) {
-        setMessage(error.message);
-        return;
-      }
-
-      const nextProfile = data ?? null;
-      setIsPro(hasActiveProAccess(nextProfile));
-      setCancelAtPeriodEnd(Boolean(nextProfile?.cancel_at_period_end));
-      setCurrentPeriodEnd(nextProfile?.current_period_end ?? null);
-    } finally {
-      setLoadingPlan(false);
-    }
-  }, []);
-
-  const reloadSessionAndPlan = useCallback(async () => {
-    if (!supabase) {
-      setLoadingSession(false);
-      return;
-    }
-
-    try {
-      setLoadingSession(true);
-
-      const { data, error } = await supabase.auth.getSession();
-
-      if (error) {
-        setMessage(error.message);
-      }
-
-      const nextSession = data.session ?? null;
-      setSession(nextSession);
-
-      if (nextSession?.user?.id) {
-        await loadPlan(nextSession.user.id);
-      } else {
-        setIsPro(false);
-        setCancelAtPeriodEnd(false);
-        setCurrentPeriodEnd(null);
-      }
-    } finally {
-      setLoadingSession(false);
-    }
-  }, [loadPlan]);
-
-  useEffect(() => {
-    if (!supabase) {
-      setLoadingSession(false);
-      return;
-    }
-
-    let mounted = true;
-    reloadSessionAndPlan();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
-      if (!mounted) return;
-      setSession(nextSession);
-      setLoadingSession(false);
-
-      if (nextSession?.user?.id) {
-        await loadPlan(nextSession.user.id);
-      } else {
-        setIsPro(false);
-        setCancelAtPeriodEnd(false);
-        setCurrentPeriodEnd(null);
-      }
-    });
-
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, [loadPlan, reloadSessionAndPlan]);
-
-  useFocusEffect(
-    useCallback(() => {
-      if (!userId) return;
-
-      refreshAppState({ silent: true });
-      loadPlan(userId);
-    }, [userId, loadPlan, refreshAppState])
-  );
-
-  useEffect(() => {
-    if (!supabase || !userId) return;
-
-    const client = supabase;
-    const channel = client
-      .channel(`account-profile-${userId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
-        () => {
-          refreshAppState({ silent: true });
-          loadPlan(userId);
-        }
-      )
-      .subscribe();
-
-    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
-      if (nextState !== 'active') return;
-      refreshAppState({ silent: true });
-      loadPlan(userId);
-    });
-
-    if (typeof window === 'undefined') {
-      return () => {
-        client.removeChannel(channel);
-        appStateSubscription.remove();
-      };
-    }
-
-    const onFocus = () => {
-      setBusy(false);
-      setLoadingSession(false);
-      setLoadingPlan(false);
-      refreshAppState({ silent: true });
-      loadPlan(userId);
-    };
-    const onPageShow = () => {
-      setBusy(false);
-      setLoadingSession(false);
-      setLoadingPlan(false);
-      void reloadSessionAndPlan();
-      refreshAppState({ silent: true });
-    };
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return;
-      setBusy(false);
-      setLoadingSession(false);
-      setLoadingPlan(false);
-      void reloadSessionAndPlan();
-      refreshAppState({ silent: true });
-    };
-
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('pageshow', onPageShow);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('pageshow', onPageShow);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      client.removeChannel(channel);
-      appStateSubscription.remove();
-    };
-  }, [userId, loadPlan, refreshAppState, reloadSessionAndPlan]);
-
-  useEffect(() => {
-    if (!busy && !loadingSession && !loadingPlan) return;
-
-    const timeout = setTimeout(() => {
-      setBusy(false);
-      setLoadingSession(false);
-      setLoadingPlan(false);
-      setMessage('Sync is taking longer than expected. We retried your account refresh.');
-      void reloadSessionAndPlan();
-      refreshAppState({ silent: true });
-    }, RECOVERY_TIMEOUT_MS);
-
-    return () => {
-      clearTimeout(timeout);
-    };
-  }, [busy, loadingSession, loadingPlan, reloadSessionAndPlan, refreshAppState]);
+  const userEmail = session?.user?.email ?? '';
+  const cancelAtPeriodEnd = Boolean(billingProfile?.cancel_at_period_end);
+  const currentPeriodEnd = billingProfile?.current_period_end ?? null;
 
   async function handleSignUp() {
     if (!supabase) return;
@@ -246,6 +60,7 @@ export default function AccountScreen() {
       }
 
       setMessage('Account created. Check your email if confirmation is enabled.');
+      await refreshAppState({ silent: true });
     } finally {
       setBusy(false);
     }
@@ -273,6 +88,7 @@ export default function AccountScreen() {
       }
 
       setMessage('Signed in successfully.');
+      await refreshAppState({ silent: true });
     } finally {
       setBusy(false);
     }
@@ -293,6 +109,7 @@ export default function AccountScreen() {
       }
 
       setMessage('Signed out.');
+      await refreshAppState({ silent: true });
     } finally {
       setBusy(false);
     }
@@ -322,7 +139,6 @@ export default function AccountScreen() {
       }
 
       await refreshAppState();
-      await loadPlan(userId);
       setMessage(nextValue ? 'Pro test mode enabled.' : 'Pro test mode disabled.');
     } finally {
       setBusy(false);
@@ -332,7 +148,7 @@ export default function AccountScreen() {
   const formattedPeriodEnd = formatPlanDate(currentPeriodEnd);
 
   function renderPlanSummary() {
-    if (loadingPlan) {
+    if (loading) {
       return 'Loading plan...';
     }
 
@@ -361,23 +177,23 @@ export default function AccountScreen() {
         <BodyText>
           {configured ? 'Supabase connected.' : 'Supabase not configured yet.'}
         </BodyText>
-        {loadingSession ? (
+        {loading ? (
           <View style={styles.row}>
             <ActivityIndicator />
             <BodyText>Checking session...</BodyText>
           </View>
-        ) : session ? (
+        ) : isSignedIn ? (
           <BodyText>Signed in as: {userEmail}</BodyText>
         ) : (
           <BodyText>No active session.</BodyText>
         )}
       </Card>
 
-      {session ? (
+      {isSignedIn ? (
         <>
           <Card>
             <Label>Plan</Label>
-            {loadingPlan ? (
+            {loading ? (
               <View style={styles.row}>
                 <ActivityIndicator />
                 <BodyText>Loading plan...</BodyText>
@@ -397,7 +213,7 @@ export default function AccountScreen() {
               <Pressable
                 style={[styles.button, busy && styles.buttonDisabled]}
                 onPress={handleTogglePro}
-                disabled={busy || loadingPlan}
+                disabled={busy || loading}
               >
                 <Label style={styles.buttonText}>
                   {busy

@@ -20,7 +20,6 @@ create table if not exists public.profiles (
   subscription_status text null
 );
 
--- If table already existed before these columns, ensure they exist:
 alter table public.profiles
   add column if not exists is_pro boolean not null default false,
   add column if not exists cancel_at_period_end boolean not null default false,
@@ -188,8 +187,6 @@ as $$
 declare
   caller uuid := auth.uid();
 begin
-  -- Allow authenticated users to operate on self.
-  -- Service role (auth.uid() is null) can operate for webhooks/admin.
   if caller is not null and caller <> target_user_id then
     raise exception 'Not authorized';
   end if;
@@ -202,12 +199,10 @@ begin
          subscription_status = 'canceled'
    where id = target_user_id;
 
-  -- Delete campaign hub items + linked campaign items
   delete from public.saved_projects
    where user_id = target_user_id
      and (tool_type = 'campaign_hub' or campaign_id is not null);
 
-  -- Keep only 3 most-recent standalone projects for free users
   with ranked as (
     select id,
            row_number() over (order by updated_at desc, created_at desc, id desc) as rn

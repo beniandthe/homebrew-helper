@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAppState } from '@/contexts/AppStateContext';
 import { BodyText, Heading, Label } from '@/components/AppText';
@@ -29,14 +28,10 @@ function formatPlanDate(value: string | null) {
 export default function PricingScreen() {
     const RECOVERY_TIMEOUT_MS = 12000;
     const [busy, setBusy] = useState(false);
-    const [loadingBillingState, setLoadingBillingState] = useState(false);
-    const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false);
-    const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null);
-    const [canceledAt, setCanceledAt] = useState<string | null>(null);
 
     const enableDevBilling = process.env.EXPO_PUBLIC_ENABLE_DEV_BILLING === 'true';
     const params = useLocalSearchParams<{ checkout?: string }>();
-    const { loading, isPro, isSignedIn, userId, refreshAppState } = useAppState();
+    const { loading, isPro, isSignedIn, userId, billingProfile, refreshAppState } = useAppState();
 
     const [statusBanner, setStatusBanner] = useState<{
         title?: string;
@@ -52,42 +47,9 @@ export default function PricingScreen() {
         setStatusBanner({ variant, title, message });
     }
 
-    const loadBillingState = useCallback(async (nextUserId: string) => {
-        if (!supabase) return;
-
-        try {
-            setLoadingBillingState(true);
-
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('cancel_at_period_end, current_period_end, canceled_at')
-                .eq('id', nextUserId)
-                .maybeSingle();
-
-            if (error) {
-                setBanner('error', 'Plan load failed', error.message);
-                return;
-            }
-
-            const nextProfile = data ?? null;
-            setCancelAtPeriodEnd(Boolean(nextProfile?.cancel_at_period_end));
-            setCurrentPeriodEnd(nextProfile?.current_period_end ?? null);
-            setCanceledAt(nextProfile?.canceled_at ?? null);
-        } finally {
-            setLoadingBillingState(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        if (!userId || !isSignedIn) {
-            setCancelAtPeriodEnd(false);
-            setCurrentPeriodEnd(null);
-            setCanceledAt(null);
-            return;
-        }
-
-        loadBillingState(userId);
-    }, [userId, isSignedIn, isPro, loadBillingState]);
+    const cancelAtPeriodEnd = Boolean(billingProfile?.cancel_at_period_end);
+    const currentPeriodEnd = billingProfile?.current_period_end ?? null;
+    const canceledAt = billingProfile?.canceled_at ?? null;
 
     useEffect(() => {
         if (params.checkout === 'success') {
@@ -96,83 +58,24 @@ export default function PricingScreen() {
                 'Purchase completed',
                 'Your Pro access is active on this account.'
             );
-            refreshAppState({ silent: true });
-            if (userId) {
-                loadBillingState(userId);
-            }
-        }
-
-        if (params.checkout === 'cancelled') {
+            void refreshAppState({ silent: true });
+        } else if (params.checkout === 'cancelled') {
             setBanner(
                 'info',
                 'Checkout canceled',
                 'Your subscription was not changed.'
             );
         }
-    }, [params.checkout, refreshAppState, userId, loadBillingState]);
-
-    useFocusEffect(
-        useCallback(() => {
-            if (!userId || !isSignedIn) return;
-
-            refreshAppState({ silent: true });
-            loadBillingState(userId);
-        }, [userId, isSignedIn, refreshAppState, loadBillingState])
-    );
+    }, [params.checkout, refreshAppState]);
 
     useEffect(() => {
-        const appStateSubscription = AppState.addEventListener('change', (nextState) => {
-            if (nextState !== 'active') return;
-            setBusy(false);
-            setLoadingBillingState(false);
-
-            if (!userId || !isSignedIn) return;
-            refreshAppState({ silent: true });
-            loadBillingState(userId);
-        });
-
-        if (Platform.OS !== 'web' || typeof window === 'undefined') {
-            return () => {
-                appStateSubscription.remove();
-            };
-        }
-
-        const syncAfterReturn = () => {
-            setBusy(false);
-            setLoadingBillingState(false);
-
-            if (!userId || !isSignedIn) return;
-            refreshAppState({ silent: true });
-            loadBillingState(userId);
-        };
-
-        const onVisibilityChange = () => {
-            if (document.visibilityState !== 'visible') return;
-            syncAfterReturn();
-        };
-
-        window.addEventListener('focus', syncAfterReturn);
-        window.addEventListener('pageshow', syncAfterReturn);
-        document.addEventListener('visibilitychange', onVisibilityChange);
-
-        return () => {
-            appStateSubscription.remove();
-            window.removeEventListener('focus', syncAfterReturn);
-            window.removeEventListener('pageshow', syncAfterReturn);
-            document.removeEventListener('visibilitychange', onVisibilityChange);
-        };
-    }, [isSignedIn, userId, refreshAppState, loadBillingState]);
-
-    useEffect(() => {
-        if (!busy && !loadingBillingState) return;
+        if (!busy) return;
 
         const timeout = setTimeout(() => {
             setBusy(false);
-            setLoadingBillingState(false);
 
             if (userId && isSignedIn) {
-                refreshAppState({ silent: true });
-                loadBillingState(userId);
+                void refreshAppState({ silent: true });
             }
 
             setBanner(
@@ -185,7 +88,7 @@ export default function PricingScreen() {
         return () => {
             clearTimeout(timeout);
         };
-    }, [busy, loadingBillingState, userId, isSignedIn, refreshAppState, loadBillingState]);
+    }, [busy, userId, isSignedIn, refreshAppState]);
 
     async function handleUpgradePress() {
         if (!supabase) {
@@ -319,9 +222,6 @@ export default function PricingScreen() {
             }
 
             await refreshAppState();
-            setCancelAtPeriodEnd(false);
-            setCurrentPeriodEnd(null);
-            setCanceledAt(null);
 
             setBanner(
                 'success',
@@ -348,7 +248,7 @@ export default function PricingScreen() {
             return 'Not signed in. Sign in to view and manage your plan.';
         }
 
-        if (loadingBillingState || loading) {
+        if (loading) {
             return 'Loading plan...';
         }
 
@@ -384,7 +284,7 @@ export default function PricingScreen() {
 
                 <Card>
                     <Label>Current Plan</Label>
-                    {loading || loadingBillingState ? (
+                    {loading ? (
                         <View style={styles.row}>
                             <ActivityIndicator />
                             <BodyText>Loading plan...</BodyText>
@@ -414,9 +314,9 @@ export default function PricingScreen() {
                             </BodyText>
 
                             <Pressable
-                                style={[styles.secondaryButton, (busy || loading || loadingBillingState) && styles.buttonDisabled]}
+                                style={[styles.secondaryButton, (busy || loading) && styles.buttonDisabled]}
                                 onPress={handleManageSubscriptionPress}
-                                disabled={busy || loading || loadingBillingState}
+                                disabled={busy || loading}
                             >
                                 <Label style={styles.secondaryButtonText}>
                                     {busy ? 'Opening...' : 'Manage Subscription'}
@@ -442,9 +342,9 @@ export default function PricingScreen() {
                             </BodyText>
 
                             <Pressable
-                                style={[styles.primaryButton, (busy || loading || loadingBillingState) && styles.buttonDisabled]}
+                                style={[styles.primaryButton, (busy || loading) && styles.buttonDisabled]}
                                 onPress={handleUpgradePress}
-                                disabled={busy || loading || loadingBillingState}
+                                disabled={busy || loading}
                             >
                                 <Label style={styles.primaryButtonText}>
                                     {busy ? 'Opening...' : 'Upgrade to Pro'}
