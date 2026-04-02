@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { useAppState } from '@/contexts/AppStateContext';
@@ -12,8 +12,8 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
-import { hasActiveProAccess } from '@/lib/billing';
 import { buildSeed, pickFromPool, pickManyFromPool } from '@/lib/generation';
+import { fetchCampaignOptions, fetchLatestSaveAccess, getErrorMessage } from '@/lib/projectAccess';
 
 type LootRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
 type RewardType = 'gear' | 'gold' | 'consumable' | 'material';
@@ -90,55 +90,25 @@ export default function LootScreen() {
       return { isPro: false, count: 0 };
     }
 
-    const [{ data: profileData }, { count, error: countError }] = await Promise.all([
-      supabase
-        .from('profiles')
-        .select('is_pro, cancel_at_period_end, current_period_end, canceled_at')
-        .eq('id', userId)
-        .maybeSingle(),
-      supabase
-        .from('saved_projects')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', userId),
-    ]);
-
-    if (countError) {
-      throw countError;
-    }
-
-    return {
-      isPro: hasActiveProAccess(profileData),
-      count: count ?? 0,
-    };
+    return fetchLatestSaveAccess(supabase, userId);
   }
 
   function handleUpgradePress() {
     router.push('/pricing');
   }
 
-  async function loadCampaignOptions() {
+  const loadCampaignOptions = useCallback(async () => {
     if (!supabase || !sessionUserId) return;
 
     try {
       setLoadingCampaigns(true);
-
-      const { data, error } = await supabase
-        .from('saved_projects')
-        .select('id, name')
-        .eq('user_id', sessionUserId)
-        .eq('tool_type', 'campaign_hub')
-        .order('updated_at', { ascending: false });
-
-      if (error) {
-        setBanner('error', 'Campaign load failed', error.message);
-        return;
-      }
-
-      setCampaignOptions((data ?? []) as CampaignOption[]);
+      setCampaignOptions(await fetchCampaignOptions(supabase, sessionUserId));
+    } catch (error) {
+      setBanner('error', 'Campaign load failed', getErrorMessage(error));
     } finally {
       setLoadingCampaigns(false);
     }
-  }
+  }, [sessionUserId]);
 
   useEffect(() => {
     if (isPro) {
@@ -147,7 +117,7 @@ export default function LootScreen() {
       setCampaignOptions([]);
       setLoadingCampaigns(false);
     }
-  }, [sessionUserId, currentProjectId, isPro]);
+  }, [sessionUserId, currentProjectId, isPro, loadCampaignOptions]);
 
   useEffect(() => {
     if (!isPro) {

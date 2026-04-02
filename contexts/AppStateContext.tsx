@@ -5,6 +5,7 @@ import type { Session } from '@supabase/supabase-js';
 import {
     BILLING_RETURN_SYNC_RETRY_MS,
     BILLING_RETURN_SYNC_WINDOW_MS,
+    type BillingProfile,
     clearPendingBillingReturn,
     getPendingBillingReturn,
     hasActiveProAccess,
@@ -16,6 +17,7 @@ type AppStateContextValue = {
     userId: string | null;
     isSignedIn: boolean;
     isPro: boolean;
+    billingProfile: BillingProfile | null;
     savedProjectCount: number;
     loading: boolean;
     refreshAppState: (options?: { silent?: boolean }) => Promise<void>;
@@ -26,6 +28,7 @@ const AppStateContext = createContext<AppStateContextValue | undefined>(undefine
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const [session, setSession] = useState<Session | null>(null);
     const [isPro, setIsPro] = useState(false);
+    const [billingProfile, setBillingProfile] = useState<BillingProfile | null>(null);
     const [savedProjectCount, setSavedProjectCount] = useState(0);
     const [loading, setLoading] = useState(true);
 
@@ -44,6 +47,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
             if (!supabase) {
                 setSession(null);
                 setIsPro(false);
+                setBillingProfile(null);
                 setSavedProjectCount(0);
                 setLoading(false);
                 return;
@@ -64,6 +68,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
                 if (!nextUserId) {
                     setIsPro(false);
+                    setBillingProfile(null);
                     setSavedProjectCount(0);
                     return;
                 }
@@ -88,7 +93,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
                     throw countError;
                 }
 
-                setIsPro(hasActiveProAccess(profileData));
+                const nextBillingProfile = profileData ?? null;
+
+                setBillingProfile(nextBillingProfile);
+                setIsPro(hasActiveProAccess(nextBillingProfile));
                 setSavedProjectCount(count ?? 0);
             } finally {
                 setLoading(false);
@@ -253,11 +261,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
             userId: session?.user?.id ?? null,
             isSignedIn: Boolean(session?.user?.id),
             isPro,
+            billingProfile,
             savedProjectCount,
             loading,
             refreshAppState,
         }),
-        [session, isPro, savedProjectCount, loading, refreshAppState]
+        [session, isPro, billingProfile, savedProjectCount, loading, refreshAppState]
     );
 
     return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
