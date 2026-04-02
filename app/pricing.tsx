@@ -9,7 +9,7 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
-import { hasActiveProAccess } from '@/lib/billing';
+import { hasActiveProAccess, markBillingReturnPending } from '@/lib/billing';
 
 
 function formatPlanDate(value: string | null) {
@@ -221,6 +221,7 @@ export default function PricingScreen() {
             }
 
             if (Platform.OS === 'web') {
+                markBillingReturnPending('checkout');
                 window.location.href = data.url;
                 return;
             }
@@ -269,6 +270,7 @@ export default function PricingScreen() {
             }
 
             if (Platform.OS === 'web') {
+                markBillingReturnPending('portal');
                 window.location.href = data.url;
                 return;
             }

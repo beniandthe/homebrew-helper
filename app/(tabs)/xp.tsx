@@ -12,6 +12,7 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { hasActiveProAccess } from '@/lib/billing';
 import { buildSeed, pickManyFromPool } from '@/lib/generation';
 
 type CurveType = 'linear' | 'smooth' | 'steep';
@@ -139,7 +140,7 @@ export default function XpCalculatorScreen() {
     const [{ data: profileData }, { count, error: countError }] = await Promise.all([
       supabase
         .from('profiles')
-        .select('is_pro')
+        .select('is_pro, cancel_at_period_end, current_period_end, canceled_at')
         .eq('id', userId)
         .maybeSingle(),
       supabase
@@ -153,7 +154,7 @@ export default function XpCalculatorScreen() {
     }
 
     return {
-      isPro: Boolean(profileData?.is_pro),
+      isPro: hasActiveProAccess(profileData),
       count: count ?? 0,
     };
   }

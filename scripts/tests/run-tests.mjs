@@ -144,6 +144,9 @@ results.push(
     const supabase = read('lib/supabase.ts');
     const pricing = read('app/pricing.tsx');
     const schema = read('supabase/schema.sql');
+    const checkoutFn = read('supabase/functions/create-checkout-session/index.ts');
+    const portalFn = read('supabase/functions/create-customer-portal-session/index.ts');
+    const webhookFn = read('supabase/functions/stripe-webhook/index.ts');
 
     assert.match(supabase, /createClient\(supabaseUrl, supabaseAnonKey/);
     assert.match(supabase, /detectSessionInUrl:\s*Platform\.OS === 'web'/);
@@ -151,6 +154,10 @@ results.push(
     assert.match(pricing, /create-checkout-session/);
     assert.match(pricing, /create-customer-portal-session/);
     assert.match(pricing, /window\.location\.href = data\.url/);
+    assert.match(checkoutFn, /success_url: `\$\{appUrl\}\/pricing\?checkout=success/);
+    assert.match(portalFn, /return_url: `\$\{appUrl\}\/pricing`/);
+    assert.match(webhookFn, /subscription\.items\.data/);
+    assert.doesNotMatch(webhookFn, /typeof subscription\.current_period_end/);
 
     assert.match(schema, /create table if not exists public\.profiles/i);
     assert.match(schema, /create table if not exists public\.(saved_projects|projects)/i);
@@ -163,11 +170,30 @@ results.push(
     const context = read('contexts/AppStateContext.tsx');
     const pricing = read('app/pricing.tsx');
     const account = read('app/(tabs)/account.tsx');
+    const campaign = read('app/(tabs)/campaign.tsx');
+    const encounters = read('app/(tabs)/encounters.tsx');
+    const generator = read('app/(tabs)/generator.tsx');
+    const quest = read('app/(tabs)/quest.tsx');
+    const xp = read('app/(tabs)/xp.tsx');
 
     assert.match(billing, /export function hasActiveProAccess/);
+    assert.match(billing, /export function markBillingReturnPending/);
+    assert.match(billing, /export function getPendingBillingReturn/);
     assert.match(context, /hasActiveProAccess/);
+    assert.match(context, /getPendingBillingReturn/);
     assert.match(pricing, /hasActiveProAccess/);
+    assert.match(pricing, /markBillingReturnPending/);
     assert.match(account, /hasActiveProAccess/);
+    assert.match(campaign, /hasActiveProAccess/);
+    assert.match(encounters, /hasActiveProAccess/);
+    assert.match(generator, /hasActiveProAccess/);
+    assert.match(quest, /hasActiveProAccess/);
+    assert.match(xp, /hasActiveProAccess/);
+    assert.doesNotMatch(campaign, /Boolean\(profileData\?\.is_pro\)/);
+    assert.doesNotMatch(encounters, /Boolean\(profileData\?\.is_pro\)/);
+    assert.doesNotMatch(generator, /Boolean\(profileData\?\.is_pro\)/);
+    assert.doesNotMatch(quest, /Boolean\(profileData\?\.is_pro\)/);
+    assert.doesNotMatch(xp, /Boolean\(profileData\?\.is_pro\)/);
   })
 );
 

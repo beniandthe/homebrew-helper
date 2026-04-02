@@ -2,7 +2,13 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState, Platform } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 
-import { hasActiveProAccess } from '@/lib/billing';
+import {
+    BILLING_RETURN_SYNC_RETRY_MS,
+    BILLING_RETURN_SYNC_WINDOW_MS,
+    clearPendingBillingReturn,
+    getPendingBillingReturn,
+    hasActiveProAccess,
+} from '@/lib/billing';
 import { supabase } from '@/lib/supabase';
 
 type AppStateContextValue = {
@@ -24,14 +30,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const [loading, setLoading] = useState(true);
 
     const refreshInFlightRef = useRef<Promise<void> | null>(null);
+    const refreshQueuedRef = useRef(false);
+    const billingReturnSyncRef = useRef<Promise<void> | null>(null);
 
     const refreshAppState = useCallback(async (options?: { silent?: boolean }) => {
         if (refreshInFlightRef.current) {
+            refreshQueuedRef.current = true;
             await refreshInFlightRef.current;
             return;
         }
 
-        const runRefresh = async () => {
+        const runSingleRefresh = async () => {
             if (!supabase) {
                 setSession(null);
                 setIsPro(false);
@@ -59,7 +68,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
                     return;
                 }
 
-                const [{ data: profileData }, { count }] = await Promise.all([
+                const [{ data: profileData, error: profileError }, { count, error: countError }] = await Promise.all([
                     supabase
                         .from('profiles')
                         .select('is_pro, cancel_at_period_end, current_period_end, canceled_at')
@@ -71,6 +80,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
                         .eq('user_id', nextUserId),
                 ]);
 
+                if (profileError) {
+                    throw profileError;
+                }
+
+                if (countError) {
+                    throw countError;
+                }
+
                 setIsPro(hasActiveProAccess(profileData));
                 setSavedProjectCount(count ?? 0);
             } finally {
@@ -78,7 +95,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
             }
         };
 
-        refreshInFlightRef.current = runRefresh();
+        const runRefreshLoop = async () => {
+            do {
+                refreshQueuedRef.current = false;
+                await runSingleRefresh();
+            } while (refreshQueuedRef.current);
+        };
+
+        refreshInFlightRef.current = runRefreshLoop();
 
         try {
             await refreshInFlightRef.current;
@@ -87,21 +111,66 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         }
     }, []);
 
+    const syncPendingBillingReturn = useCallback(async () => {
+        if (Platform.OS !== 'web' || typeof window === 'undefined') {
+            return;
+        }
+
+        const pending = getPendingBillingReturn();
+        if (!pending) {
+            return;
+        }
+
+        if (billingReturnSyncRef.current) {
+            await billingReturnSyncRef.current;
+            return;
+        }
+
+        const runSync = async () => {
+            const deadlineMs = pending.startedAt + BILLING_RETURN_SYNC_WINDOW_MS;
+
+            try {
+                while (Date.now() <= deadlineMs) {
+                    await refreshAppState({ silent: true });
+
+                    if (Date.now() >= deadlineMs) {
+                        break;
+                    }
+
+                    await new Promise((resolve) => {
+                        window.setTimeout(resolve, BILLING_RETURN_SYNC_RETRY_MS);
+                    });
+                }
+            } finally {
+                clearPendingBillingReturn();
+            }
+        };
+
+        billingReturnSyncRef.current = runSync();
+
+        try {
+            await billingReturnSyncRef.current;
+        } finally {
+            billingReturnSyncRef.current = null;
+        }
+    }, [refreshAppState]);
+
     useEffect(() => {
-        refreshAppState();
+        void refreshAppState();
+        void syncPendingBillingReturn();
 
         if (!supabase) return;
 
         const {
             data: { subscription },
         } = supabase.auth.onAuthStateChange(() => {
-            refreshAppState();
+            void refreshAppState();
         });
 
         return () => {
             subscription.unsubscribe();
         };
-    }, [refreshAppState]);
+    }, [refreshAppState, syncPendingBillingReturn]);
 
     useEffect(() => {
         if (!supabase || !session?.user?.id) return;
@@ -114,14 +183,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'saved_projects', filter: `user_id=eq.${userId}` },
                 () => {
-                    refreshAppState({ silent: true });
+                    void refreshAppState({ silent: true });
                 }
             )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
                 () => {
-                    refreshAppState({ silent: true });
+                    void refreshAppState({ silent: true });
                 }
             )
             .subscribe();
@@ -134,7 +203,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         const appStateSubscription = AppState.addEventListener('change', (nextState) => {
             if (nextState === 'active') {
-                refreshAppState({ silent: true });
+                void refreshAppState({ silent: true });
+                void syncPendingBillingReturn();
             }
         });
 
@@ -145,19 +215,22 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         }
 
         const onFocus = () => {
-            refreshAppState({ silent: true });
+            void refreshAppState({ silent: true });
+            void syncPendingBillingReturn();
         };
         const onPageShow = () => {
-            refreshAppState({ silent: true });
+            void refreshAppState({ silent: true });
+            void syncPendingBillingReturn();
         };
         const onVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
-                refreshAppState({ silent: true });
+                void refreshAppState({ silent: true });
+                void syncPendingBillingReturn();
             }
         };
         const onStorage = (event: StorageEvent) => {
             if (!event.key || !event.key.includes('supabase.auth')) return;
-            refreshAppState({ silent: true });
+            void refreshAppState({ silent: true });
         };
 
         window.addEventListener('focus', onFocus);
@@ -172,7 +245,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
             document.removeEventListener('visibilitychange', onVisibilityChange);
             appStateSubscription.remove();
         };
-    }, [refreshAppState]);
+    }, [refreshAppState, syncPendingBillingReturn]);
 
     const value = useMemo(
         () => ({
