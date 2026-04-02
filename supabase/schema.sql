@@ -38,6 +38,9 @@ create unique index if not exists idx_profiles_stripe_subscription_id
   on public.profiles (stripe_subscription_id)
   where stripe_subscription_id is not null;
 
+create index if not exists idx_projects_user_id
+  on public.projects (user_id);
+
 -- =========================================================
 -- LEGACY PROJECTS (kept for compatibility with prior schema)
 -- =========================================================
@@ -80,6 +83,9 @@ create index if not exists idx_saved_projects_campaign_hubs
   where tool_type = 'campaign_hub';
 create index if not exists idx_saved_projects_user_campaign_updated
   on public.saved_projects(user_id, campaign_id, updated_at desc)
+  where campaign_id is not null;
+create index if not exists idx_saved_projects_campaign_id
+  on public.saved_projects (campaign_id)
   where campaign_id is not null;
 
 -- =========================================================
@@ -179,6 +185,8 @@ for each row execute procedure public.handle_new_user();
 -- =========================================================
 -- Downgrade RPC used by app
 -- =========================================================
+drop function if exists public.downgrade_to_free_and_trim_projects();
+
 create or replace function public.downgrade_to_free_and_trim_projects(target_user_id uuid)
 returns void
 language plpgsql
