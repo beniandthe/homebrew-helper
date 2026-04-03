@@ -7,6 +7,7 @@ import { BodyText, Heading, Label } from '@/components/AppText';
 import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
+import { buildAuthRedirectUrl } from '@/lib/authRedirect';
 import { supabase } from '@/lib/supabase';
 
 function formatPlanDate(value: string | null) {
@@ -37,6 +38,7 @@ export default function AccountScreen() {
   const userEmail = session?.user?.email ?? '';
   const cancelAtPeriodEnd = Boolean(billingProfile?.cancel_at_period_end);
   const currentPeriodEnd = billingProfile?.current_period_end ?? null;
+  const emailRedirectTo = buildAuthRedirectUrl('/auth/confirm', { next: '/account' });
 
   async function handleSignUp() {
     if (!supabase) return;
@@ -52,6 +54,11 @@ export default function AccountScreen() {
       const { error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
+        options: emailRedirectTo
+          ? {
+              emailRedirectTo,
+            }
+          : undefined,
       });
 
       if (error) {
@@ -61,6 +68,38 @@ export default function AccountScreen() {
 
       setMessage('Account created. Check your email if confirmation is enabled.');
       await refreshAppState({ silent: true });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResendConfirmation() {
+    if (!supabase) return;
+    if (!email.trim()) {
+      setMessage('Enter your email address first.');
+      return;
+    }
+
+    try {
+      setBusy(true);
+      setMessage('');
+
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: email.trim(),
+        options: emailRedirectTo
+          ? {
+              emailRedirectTo,
+            }
+          : undefined,
+      });
+
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
+
+      setMessage('Verification email resent. Check your inbox.');
     } finally {
       setBusy(false);
     }
@@ -278,6 +317,14 @@ export default function AccountScreen() {
                 <Label style={styles.buttonText}>Sign Up</Label>
               </Pressable>
             </View>
+
+            <Pressable
+              style={[styles.buttonSecondary, busy && styles.buttonDisabled]}
+              onPress={handleResendConfirmation}
+              disabled={busy}
+            >
+              <Label style={styles.buttonText}>Resend Verification Email</Label>
+            </Pressable>
 
             {message ? <BodyText style={styles.message}>{message}</BodyText> : null}
           </Card>

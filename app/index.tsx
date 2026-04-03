@@ -4,6 +4,7 @@ import { BodyText, Heading, Label } from '@/components/AppText';
 import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
+import { SUPPORT_EMAIL } from '@/lib/siteConfig';
 
 export default function LandingPage() {
     return (
@@ -220,7 +221,7 @@ export default function LandingPage() {
 
                 <Card>
                     <Label>Support & Legal</Label>
-                    <BodyText>Support: homebrewhelper@gmail.com</BodyText>
+                    <BodyText>Support: {SUPPORT_EMAIL}</BodyText>
 
                     <View style={styles.footerLinks}>
                         <Pressable onPress={() => router.push('/privacy')}>

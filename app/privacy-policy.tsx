@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { BodyText, Heading, Label } from '@/components/AppText';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
+import { SUPPORT_EMAIL } from '@/lib/siteConfig';
 
 export default function PrivacyPolicyScreen() {
   return (
@@ -101,7 +102,7 @@ export default function PrivacyPolicyScreen() {
 
           <Heading style={styles.sectionTitle}>10. Contact</Heading>
           <BodyText>If you have any questions about this Privacy Policy, you can contact us at:</BodyText>
-          <BodyText>homebrewhelper@gmail.com</BodyText>
+          <BodyText>{SUPPORT_EMAIL}</BodyText>
 
           <Pressable style={styles.backLink} onPress={() => router.push('/')}>
             <Label style={styles.backLinkText}>Back to Home</Label>

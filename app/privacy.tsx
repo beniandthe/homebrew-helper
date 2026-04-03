@@ -4,6 +4,7 @@ import { BodyText, Heading, Label } from '@/components/AppText';
 import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { Spacing } from '@/constants/theme';
+import { SUPPORT_EMAIL } from '@/lib/siteConfig';
 
 export default function PrivacyPage() {
     return (
@@ -122,7 +123,7 @@ export default function PrivacyPage() {
 
                 <Card>
                     <Label>10. Contact</Label>
-                    <BodyText>homebrewhelper@gmail.com</BodyText>
+                    <BodyText>{SUPPORT_EMAIL}</BodyText>
                 </Card>
 
                 <Card>

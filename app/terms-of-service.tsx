@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { BodyText, Heading, Label } from '@/components/AppText';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
+import { SUPPORT_EMAIL } from '@/lib/siteConfig';
 
 export default function TermsOfServiceScreen() {
   return (
@@ -111,7 +112,7 @@ export default function TermsOfServiceScreen() {
 
           <Heading style={styles.sectionTitle}>12. Contact</Heading>
           <BodyText>If you have questions about these Terms, you can contact:</BodyText>
-          <BodyText>homebrewhelper@gmail.com</BodyText>
+          <BodyText>{SUPPORT_EMAIL}</BodyText>
 
           <Pressable style={styles.backLink} onPress={() => router.push('/')}>
             <Label style={styles.backLinkText}>Back to Home</Label>
