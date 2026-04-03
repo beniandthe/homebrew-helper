@@ -11,7 +11,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/tests/run-tests.mjs",
-    "export:web": "expo export --platform web",
+    "export:web": "expo export --platform web --clear",
     "check": "npm run lint && npm run typecheck && npm test && npm run export:web"
   },
   "dependencies": {
