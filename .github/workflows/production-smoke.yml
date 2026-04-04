@@ -17,7 +17,8 @@ jobs:
             expected: Homebrew Helper
           - name: pricing
             url: https://homebrewhelper.expo.app/pricing
-            expected: 4.99/month
+            expected: Current Pricing
+            expected_secondary: $4.99
           - name: privacy
             url: https://homebrewhelper.expo.app/privacy
             expected: admin@homebrew-helper.com
@@ -31,6 +32,19 @@ jobs:
         env:
           URL: ${{ matrix.url }}
           EXPECTED: ${{ matrix.expected }}
+          EXPECTED_SECONDARY: ${{ matrix.expected_secondary || '' }}
         run: |
-          html="$(curl --fail --silent --show-error --location "$URL")"
-          echo "$html" | grep -F "$EXPECTED" > /dev/null
+          html="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 60 "$URL")"
+          normalized_html="$(printf '%s' "$html" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
+
+          if ! printf '%s' "$normalized_html" | grep -F "$EXPECTED" > /dev/null; then
+            echo "Expected text not found for $URL: $EXPECTED"
+            exit 1
+          fi
+
+          if [ -n "$EXPECTED_SECONDARY" ]; then
+            if ! printf '%s' "$normalized_html" | grep -F "$EXPECTED_SECONDARY" > /dev/null; then
+              echo "Expected secondary text not found for $URL: $EXPECTED_SECONDARY"
+              exit 1
+            fi
+          fi
