@@ -71,6 +71,7 @@ Required GitHub configuration:
 - `EXPO_PUBLIC_*` values are client-visible and should never contain secrets.
 - `EXPO_PUBLIC_APP_URL` and `EXPO_PUBLIC_SUPPORT_EMAIL` are used in the client bundle, so keep them aligned with the production site URL and public contact address before exporting or deploying web.
 - Stripe secret keys, webhook secrets, and the Supabase service-role key belong only in local `.env`, Supabase secrets, or GitHub secrets.
+- See [SECURITY.md](/C:/Users/rossm/rpg-toolkit-starter/SECURITY.md) for private vulnerability reporting.
 
 ## Operational notes
 
@@ -79,3 +80,4 @@ Required GitHub configuration:
 - `APP_URL` is the server-side source of truth for Stripe return URLs.
 - `EXPO_PUBLIC_APP_URL` is used as a non-web auth redirect fallback in [authRedirect.ts](/C:/Users/rossm/rpg-toolkit-starter/lib/authRedirect.ts), while web uses `window.location.origin`.
 - `EXPO_PUBLIC_SUPPORT_EMAIL` feeds the public support address rendered on the landing and legal pages.
+- Launch and post-launch checks live in [launch-monitoring.md](/C:/Users/rossm/rpg-toolkit-starter/docs/launch-monitoring.md).

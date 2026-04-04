@@ -1,0 +1,36 @@
+name: Production Smoke
+
+on:
+  schedule:
+    - cron: "0 16 * * *"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: home
+            url: https://homebrewhelper.expo.app/
+            expected: Homebrew Helper
+          - name: pricing
+            url: https://homebrewhelper.expo.app/pricing
+            expected: 4.99/month
+          - name: privacy
+            url: https://homebrewhelper.expo.app/privacy
+            expected: admin@homebrew-helper.com
+          - name: terms
+            url: https://homebrewhelper.expo.app/terms
+            expected: admin@homebrew-helper.com
+
+    steps:
+      - name: Check ${{ matrix.name }}
+        shell: bash
+        env:
+          URL: ${{ matrix.url }}
+          EXPECTED: ${{ matrix.expected }}
+        run: |
+          html="$(curl --fail --silent --show-error --location "$URL")"
+          echo "$html" | grep -F "$EXPECTED" > /dev/null
