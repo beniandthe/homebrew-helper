@@ -3,14 +3,15 @@ import { router, Tabs } from 'expo-router';
 import { Colors } from '@/constants/theme';
 import { Pressable } from 'react-native';
 import { Label } from '@/components/AppText';
+import { getHeaderPlanLabel } from '@/lib/subscriptionUi';
 
 function UpgradeHeaderButton() {
-  return (
+    return (
     <Pressable
       onPress={() => router.push('/pricing')}
       style={{ paddingHorizontal: 12, paddingVertical: 8 }}
     >
-      <Label>Upgrade</Label>
+      <Label>{getHeaderPlanLabel()}</Label>
     </Pressable>
   );
 }

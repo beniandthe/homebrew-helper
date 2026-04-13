@@ -14,6 +14,7 @@ import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
 import { buildSeed, pickManyFromPool } from '@/lib/generation';
 import { fetchCampaignOptions, fetchLatestSaveAccess, getErrorMessage } from '@/lib/projectAccess';
+import { getCampaignLinkUpsell, getFreeLimitUpsell } from '@/lib/subscriptionUi';
 
 type CurveType = 'linear' | 'smooth' | 'steep';
 type ProgressionPreset = 'slow' | 'standard' | 'heroic' | 'brutal' | 'custom';
@@ -74,6 +75,8 @@ export default function XpCalculatorScreen() {
   const maxFreeSaves = 3;
   const isAtFreeLimit = !isPro && savedProjectCount >= maxFreeSaves;
   const isCreatingNewProject = !currentProjectId;
+  const freeLimitUpsell = getFreeLimitUpsell(maxFreeSaves);
+  const campaignLinkUpsell = getCampaignLinkUpsell('This progression plan');
 
   const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
@@ -636,13 +639,13 @@ export default function XpCalculatorScreen() {
         <Label>Campaign Link</Label>
 
         {!isPro ? (
-          <View style={styles.proLockedBlock}>
-            <View style={styles.proLockedHeader}>
-              <Label style={styles.proLockedTitle}>★ Pro only</Label>
-              <BodyText style={styles.proLockedText}>
-                Link this progression plan to a Campaign Hub workspace.
-              </BodyText>
-            </View>
+            <View style={styles.proLockedBlock}>
+              <View style={styles.proLockedHeader}>
+                <Label style={styles.proLockedTitle}>★ {campaignLinkUpsell.lockedTitle}</Label>
+                <BodyText style={styles.proLockedText}>
+                  {campaignLinkUpsell.lockedMessage}
+                </BodyText>
+              </View>
 
             <View style={styles.lockedPillRow}>
               <View style={[styles.pill, styles.lockedPill]}>
@@ -657,11 +660,11 @@ export default function XpCalculatorScreen() {
             </View>
 
             <BodyText style={styles.proLockedHint}>
-              Upgrade to Pro to organize XP, encounters, loot, and quests inside a shared campaign workspace.
+              {campaignLinkUpsell.message}
             </BodyText>
 
             <Pressable onPress={handleUpgradePress} style={styles.inlineUpgradeButton}>
-              <Label style={styles.inlineUpgradeButtonText}>Get Pro</Label>
+              <Label style={styles.inlineUpgradeButtonText}>{campaignLinkUpsell.buttonLabel}</Label>
             </Pressable>
           </View>
         ) : loadingCampaigns ? (
@@ -878,9 +881,9 @@ export default function XpCalculatorScreen() {
 
           {sessionUserId && isCreatingNewProject && isAtFreeLimit ? (
             <UpgradeBanner
-              title="Free plan limit reached"
-              message="You have used all 3 free saves. Upgrade to Pro to create additional projects."
-              buttonLabel="Upgrade to Pro"
+              title={freeLimitUpsell.title}
+              message={freeLimitUpsell.message}
+              buttonLabel={freeLimitUpsell.buttonLabel}
               onPress={handleUpgradePress}
             />
           ) : null}

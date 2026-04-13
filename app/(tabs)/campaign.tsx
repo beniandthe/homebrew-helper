@@ -12,6 +12,7 @@ import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
 import { buildSeed, pickManyFromPool } from '@/lib/generation';
 import { fetchLatestSaveAccess } from '@/lib/projectAccess';
+import { getCampaignHubUpsell } from '@/lib/subscriptionUi';
 
 type CampaignTone = 'heroic' | 'grim' | 'mystic' | 'political' | 'sandbox';
 
@@ -70,6 +71,7 @@ export default function CampaignScreen() {
     } = useAppState();
 
     const maxFreeSaves = 3;
+    const campaignHubUpsell = getCampaignHubUpsell();
 
     function setBanner(
         variant: StatusBannerVariant,
@@ -360,7 +362,7 @@ export default function CampaignScreen() {
                 <Card>
                     <Heading>Campaign Hub</Heading>
                     <BodyText>
-                        Campaign Hub is a Pro workspace for organizing encounters, loot, quests, and progression plans into one campaign.
+                        {campaignHubUpsell.message}
                     </BodyText>
                 </Card>
 
@@ -374,9 +376,9 @@ export default function CampaignScreen() {
                 ) : null}
 
                 <UpgradeBanner
-                    title="Campaign Hub is Pro-only"
-                    message="Upgrade to Pro to build campaign workspaces, link saved tool projects, and manage prep in one place."
-                    buttonLabel="Upgrade to Pro"
+                    title={campaignHubUpsell.title}
+                    message={campaignHubUpsell.message}
+                    buttonLabel={campaignHubUpsell.buttonLabel}
                     onPress={handleUpgradePress}
                 />
 

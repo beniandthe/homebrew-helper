@@ -76,7 +76,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
                 const [{ data: profileData, error: profileError }, { count, error: countError }] = await Promise.all([
                     supabase
                         .from('profiles')
-                        .select('is_pro, cancel_at_period_end, current_period_end, canceled_at')
+                        .select('is_pro, cancel_at_period_end, current_period_end, canceled_at, subscription_status, billing_provider, billing_product_id, billing_entitlement_id, billing_store, billing_last_synced_at, revenuecat_app_user_id')
                         .eq('id', nextUserId)
                         .maybeSingle(),
                     supabase

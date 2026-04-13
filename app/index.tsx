@@ -5,8 +5,11 @@ import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { SUPPORT_EMAIL } from '@/lib/siteConfig';
+import { getLandingPricingCopy, isNativePlanPreview } from '@/lib/subscriptionUi';
 
 export default function LandingPage() {
+    const landingPricingCopy = getLandingPricingCopy(3);
+
     return (
         <Screen>
             <ScrollView contentContainerStyle={styles.content}>
@@ -34,7 +37,9 @@ export default function LandingPage() {
                                 style={styles.secondaryButton}
                                 onPress={() => router.push('/pricing')}
                             >
-                                <Label style={styles.secondaryButtonText}>View Pricing</Label>
+                                <Label style={styles.secondaryButtonText}>
+                                    {isNativePlanPreview ? 'View Plans' : 'View Pricing'}
+                                </Label>
                             </Pressable>
                         </View>
                     </View>
@@ -113,11 +118,14 @@ export default function LandingPage() {
                 </Card>
 
                 <Card>
-                    <Label>Upgrade when you need a real campaign workspace</Label>
-                    <Heading>Free is for trying ideas. Pro is for running a campaign with structure.</Heading>
+                    <Label>
+                        {isNativePlanPreview
+                            ? 'Mobile roadmap'
+                            : 'Upgrade when you need a real campaign workspace'}
+                    </Label>
+                    <Heading>{landingPricingCopy.heading}</Heading>
                     <BodyText>
-                        Pro is designed for game masters who want to save more, organize more,
-                        and connect their prep in one place.
+                        {landingPricingCopy.body}
                     </BodyText>
 
                     <View style={styles.grid}>
@@ -137,9 +145,11 @@ export default function LandingPage() {
                         </View>
 
                         <View style={styles.featureCard}>
-                            <Label>Long-form prep support</Label>
+                            <Label>{isNativePlanPreview ? 'Mobile Pro roadmap' : 'Long-form prep support'}</Label>
                             <BodyText>
-                                Keep campaign notes, objectives, and session planning connected over time.
+                                {isNativePlanPreview
+                                    ? 'Campaign Hub, native subscriptions, and mobile plan management are planned for a later release.'
+                                    : 'Keep campaign notes, objectives, and session planning connected over time.'}
                             </BodyText>
                         </View>
                     </View>
@@ -175,7 +185,7 @@ export default function LandingPage() {
 
                 <Card>
                     <Label>Simple pricing</Label>
-                    <Heading>Start free. Upgrade when you need more room.</Heading>
+                    <Heading>{landingPricingCopy.heading}</Heading>
 
                     <View style={styles.pricingGrid}>
                         <View style={styles.pricingCard}>
@@ -189,18 +199,17 @@ export default function LandingPage() {
                         </View>
 
                         <View style={styles.pricingCard}>
-                            <Label>Pro — $4.99/month</Label>
-                            <BodyText>For active GMs and long-running campaigns.</BodyText>
+                            <Label>{landingPricingCopy.proLabel}</Label>
+                            <BodyText>{landingPricingCopy.proDescription}</BodyText>
                             <View style={styles.bulletList}>
-                                <BodyText>• Unlimited saved projects</BodyText>
-                                <BodyText>• Campaign Hub access</BodyText>
-                                <BodyText>• Linked planning workflows</BodyText>
-                                <BodyText>• Manage billing anytime</BodyText>
+                                {landingPricingCopy.proBullets.map((bullet) => (
+                                    <BodyText key={bullet}>• {bullet}</BodyText>
+                                ))}
                             </View>
                         </View>
                     </View>
 
-                    <BodyText style={styles.subtleText}>Cancel anytime.</BodyText>
+                    <BodyText style={styles.subtleText}>{landingPricingCopy.footer}</BodyText>
 
                     <View style={styles.heroActions}>
                         <Pressable
@@ -214,7 +223,7 @@ export default function LandingPage() {
                             style={styles.secondaryButton}
                             onPress={() => router.push('/pricing')}
                         >
-                            <Label style={styles.secondaryButtonText}>View Pricing</Label>
+                            <Label style={styles.secondaryButtonText}>{landingPricingCopy.buttonLabel}</Label>
                         </Pressable>
                     </View>
                 </Card>
