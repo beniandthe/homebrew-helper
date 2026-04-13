@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useBilling } from '@/contexts/BillingContext';
 import { BodyText, Heading, Label } from '@/components/AppText';
 import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
-import { hasActiveProAccess, markBillingReturnPending } from '@/lib/billing';
+import { hasActiveProAccess } from '@/lib/billing';
+import { isNativePlanPreview } from '@/lib/subscriptionUi';
 
 
 function formatPlanDate(value: string | null) {
@@ -26,12 +28,25 @@ function formatPlanDate(value: string | null) {
 }
 
 export default function PricingScreen() {
-    const RECOVERY_TIMEOUT_MS = 12000;
     const [busy, setBusy] = useState(false);
 
     const enableDevBilling = process.env.EXPO_PUBLIC_ENABLE_DEV_BILLING === 'true';
     const params = useLocalSearchParams<{ checkout?: string }>();
     const { loading, isPro, isSignedIn, userId, billingProfile, refreshAppState } = useAppState();
+    const {
+        billingBusy,
+        billingConfigured,
+        billingProvider,
+        canManageSubscription,
+        canPurchase,
+        canRestorePurchases,
+        currentPackage,
+        loadingBillingState,
+        nativeEntitlement,
+        manageSubscription,
+        purchasePro,
+        restorePurchases,
+    } = useBilling();
 
     const [statusBanner, setStatusBanner] = useState<{
         title?: string;
@@ -68,34 +83,7 @@ export default function PricingScreen() {
         }
     }, [params.checkout, refreshAppState]);
 
-    useEffect(() => {
-        if (!busy) return;
-
-        const timeout = setTimeout(() => {
-            setBusy(false);
-
-            if (userId && isSignedIn) {
-                void refreshAppState({ silent: true });
-            }
-
-            setBanner(
-                'info',
-                'Still syncing',
-                'Billing is taking longer than expected. We retried your account sync.'
-            );
-        }, RECOVERY_TIMEOUT_MS);
-
-        return () => {
-            clearTimeout(timeout);
-        };
-    }, [busy, userId, isSignedIn, refreshAppState]);
-
     async function handleUpgradePress() {
-        if (!supabase) {
-            setBanner('error', 'Supabase not configured', 'Missing Supabase configuration.');
-            return;
-        }
-
         if (!isSignedIn || !userId) {
             setBanner('error', 'Sign in required', 'Please sign in before upgrading to Pro.');
             return;
@@ -106,45 +94,32 @@ export default function PricingScreen() {
             return;
         }
 
-        try {
-            setBusy(true);
-
-            const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-                body: {},
-            });
-
-            if (error) {
-                setBanner('error', 'Checkout failed', error.message);
-                return;
-            }
-
-            if (!data?.url) {
-                setBanner('error', 'Checkout failed', 'No checkout URL was returned.');
-                return;
-            }
-
-            if (Platform.OS === 'web') {
-                markBillingReturnPending('checkout');
-                window.location.href = data.url;
-                return;
-            }
-
+        if (isNativePlanPreview) {
             setBanner(
                 'info',
-                'Web checkout required',
-                'Stripe checkout is currently set up for web only.'
+                'Mobile Pro coming soon',
+                'Add your RevenueCat keys and store products to enable native subscriptions in this build.'
             );
-        } finally {
-            setBusy(false);
+            return;
+        }
+
+        try {
+            const result = await purchasePro();
+
+            if (result.status === 'cancelled') {
+                setBanner('info', 'Purchase canceled', 'Your subscription was not changed.');
+                return;
+            }
+
+            if (billingProvider === 'revenuecat') {
+                setBanner('success', 'Purchase completed', 'Your Pro access is active on this account.');
+            }
+        } catch (error) {
+            setBanner('error', 'Checkout failed', error instanceof Error ? error.message : 'Unknown billing error.');
         }
     }
 
     async function handleManageSubscriptionPress() {
-        if (!supabase) {
-            setBanner('error', 'Supabase not configured', 'Missing Supabase configuration.');
-            return;
-        }
-
         if (!isSignedIn || !userId) {
             setBanner('error', 'Sign in required', 'Please sign in before managing your subscription.');
             return;
@@ -156,35 +131,29 @@ export default function PricingScreen() {
         }
 
         try {
-            setBusy(true);
+            await manageSubscription();
+        } catch (error) {
+            setBanner('error', 'Subscription management failed', error instanceof Error ? error.message : 'Unknown billing error.');
+        }
+    }
 
-            const { data, error } = await supabase.functions.invoke('create-customer-portal-session', {
-                body: {},
-            });
+    async function handleRestorePurchasesPress() {
+        if (!isSignedIn || !userId) {
+            setBanner('error', 'Sign in required', 'Please sign in before restoring purchases.');
+            return;
+        }
 
-            if (error) {
-                setBanner('error', 'Portal failed', error.message);
+        try {
+            const result = await restorePurchases();
+
+            if (result.status === 'cancelled') {
+                setBanner('info', 'Restore canceled', 'No changes were applied to your account.');
                 return;
             }
 
-            if (!data?.url) {
-                setBanner('error', 'Portal failed', 'No portal URL was returned.');
-                return;
-            }
-
-            if (Platform.OS === 'web') {
-                markBillingReturnPending('portal');
-                window.location.href = data.url;
-                return;
-            }
-
-            setBanner(
-                'info',
-                'Web portal required',
-                'Subscription management is currently set up for web only.'
-            );
-        } finally {
-            setBusy(false);
+            setBanner('success', 'Purchases restored', 'Your store purchases have been synced to this account.');
+        } catch (error) {
+            setBanner('error', 'Restore failed', error instanceof Error ? error.message : 'Unknown billing error.');
         }
     }
 
@@ -248,28 +217,52 @@ export default function PricingScreen() {
             return 'Not signed in. Sign in to view and manage your plan.';
         }
 
-        if (loading) {
+        if (loading || loadingBillingState) {
             return 'Loading plan...';
         }
 
         if (effectivePro && cancelAtPeriodEnd && formattedPeriodEnd) {
-            return `Pro has been canceled and remains active until ${formattedPeriodEnd}.`;
+            if (billingProvider === 'revenuecat') {
+                return `Pro is active until ${formattedPeriodEnd}. Manage renewal and cancellation through ${Platform.OS === 'ios' ? 'the App Store' : 'Google Play'}.`;
+            }
+
+            return isNativePlanPreview
+                ? `Pro access remains active until ${formattedPeriodEnd}. Native subscription changes are not available in this mobile beta yet.`
+                : `Pro has been canceled and remains active until ${formattedPeriodEnd}.`;
         }
 
         if (effectivePro) {
-            return 'Pro is active and renews automatically.';
+            if (billingProvider === 'revenuecat') {
+                return `Pro is active through ${Platform.OS === 'ios' ? 'the App Store' : 'Google Play'}.`;
+            }
+
+            return isNativePlanPreview
+                ? 'Pro access is active on this account. Native subscription management is not wired up in this beta build yet.'
+                : 'Pro is active and renews automatically.';
         }
 
-        return 'Free plan active. You can save up to 3 total projects.';
+        if (billingProvider === 'revenuecat' && billingConfigured) {
+            return 'Free plan active. Subscribe on your device store to unlock Pro.';
+        }
+
+        return isNativePlanPreview
+            ? 'Mobile beta currently includes the free plan. Core tools and saved projects are available now.'
+            : 'Free plan active. You can save up to 3 total projects.';
     }
 
     return (
         <Screen>
             <ScrollView contentContainerStyle={styles.content}>
                 <Card>
-                    <Heading>Pricing & Subscription</Heading>
+                    <Heading>
+                        {isNativePlanPreview ? 'Plans & Mobile Beta' : 'Pricing & Subscription'}
+                    </Heading>
                     <BodyText>
-                        Manage your current plan and upgrade when you need unlimited saved projects.
+                        {billingProvider === 'revenuecat'
+                            ? 'Manage your current plan, restore purchases, and subscribe through the device store.'
+                            : isNativePlanPreview
+                            ? 'Review what is live on mobile today and how Pro will expand in a later native release.'
+                            : 'Manage your current plan and upgrade when you need unlimited saved projects.'}
                     </BodyText>
                 </Card>
 
@@ -284,7 +277,7 @@ export default function PricingScreen() {
 
                 <Card>
                     <Label>Current Plan</Label>
-                    {loading ? (
+                    {loading || loadingBillingState ? (
                         <View style={styles.row}>
                             <ActivityIndicator />
                             <BodyText>Loading plan...</BodyText>
@@ -308,26 +301,44 @@ export default function PricingScreen() {
                     ) : effectivePro ? (
                         <>
                             <BodyText>
-                                {cancelAtPeriodEnd && formattedPeriodEnd
-                                    ? `Your subscription is set to end on ${formattedPeriodEnd}. You can still manage billing and payment details through Stripe until then.`
-                                    : 'You currently have Pro access. Manage billing, payment method, and cancellation through Stripe.'}
+                                {billingProvider === 'revenuecat'
+                                    ? `Your current Pro access is linked through ${Platform.OS === 'ios' ? 'the App Store' : 'Google Play'}.`
+                                    : isNativePlanPreview
+                                        ? 'Pro access is active on your account. Native subscription management is not wired up in this beta build yet.'
+                                        : cancelAtPeriodEnd && formattedPeriodEnd
+                                        ? `Your subscription is set to end on ${formattedPeriodEnd}. You can still manage billing and payment details through Stripe until then.`
+                                        : 'You currently have Pro access. Manage billing, payment method, and cancellation through Stripe.'}
                             </BodyText>
 
-                            <Pressable
-                                style={[styles.secondaryButton, (busy || loading) && styles.buttonDisabled]}
-                                onPress={handleManageSubscriptionPress}
-                                disabled={busy || loading}
-                            >
-                                <Label style={styles.secondaryButtonText}>
-                                    {busy ? 'Opening...' : 'Manage Subscription'}
-                                </Label>
-                            </Pressable>
+                            {canManageSubscription ? (
+                                <Pressable
+                                    style={[styles.secondaryButton, (billingBusy || busy || loading || loadingBillingState) && styles.buttonDisabled]}
+                                    onPress={handleManageSubscriptionPress}
+                                    disabled={billingBusy || busy || loading || loadingBillingState}
+                                >
+                                    <Label style={styles.secondaryButtonText}>
+                                        {billingBusy ? 'Opening...' : 'Manage Subscription'}
+                                    </Label>
+                                </Pressable>
+                            ) : null}
+
+                            {canRestorePurchases ? (
+                                <Pressable
+                                    style={[styles.secondaryButton, (billingBusy || busy || loading || loadingBillingState) && styles.buttonDisabled]}
+                                    onPress={handleRestorePurchasesPress}
+                                    disabled={billingBusy || busy || loading || loadingBillingState}
+                                >
+                                    <Label style={styles.secondaryButtonText}>
+                                        {billingBusy ? 'Working...' : 'Restore Purchases'}
+                                    </Label>
+                                </Pressable>
+                            ) : null}
 
                             {enableDevBilling ? (
                                 <Pressable
-                                    style={[styles.dangerButton, (busy || loading) && styles.buttonDisabled]}
+                                    style={[styles.dangerButton, (busy || billingBusy || loading || loadingBillingState) && styles.buttonDisabled]}
                                     onPress={handleDisableProDev}
-                                    disabled={busy || loading}
+                                    disabled={busy || billingBusy || loading || loadingBillingState}
                                 >
                                     <Label style={styles.primaryButtonText}>
                                         {busy ? 'Working...' : 'Disable Pro (Dev Only)'}
@@ -338,18 +349,40 @@ export default function PricingScreen() {
                     ) : (
                         <>
                             <BodyText>
-                                Upgrade to Pro to unlock unlimited saved projects and Campaign Hub organization.
+                                {billingProvider === 'revenuecat'
+                                    ? 'Subscribe on your device store to unlock unlimited saves and Campaign Hub access on this account.'
+                                    : isNativePlanPreview
+                                    ? 'Mobile beta currently ships the free toolkit and save flow. Native Pro subscriptions and Campaign Hub unlocks are planned for a later release.'
+                                    : 'Upgrade to Pro to unlock unlimited saved projects and Campaign Hub organization.'}
                             </BodyText>
 
-                            <Pressable
-                                style={[styles.primaryButton, (busy || loading) && styles.buttonDisabled]}
-                                onPress={handleUpgradePress}
-                                disabled={busy || loading}
-                            >
-                                <Label style={styles.primaryButtonText}>
-                                    {busy ? 'Opening...' : 'Upgrade to Pro'}
-                                </Label>
-                            </Pressable>
+                            {canPurchase ? (
+                                <Pressable
+                                    style={[styles.primaryButton, (billingBusy || busy || loading || loadingBillingState) && styles.buttonDisabled]}
+                                    onPress={handleUpgradePress}
+                                    disabled={billingBusy || busy || loading || loadingBillingState}
+                                >
+                                    <Label style={styles.primaryButtonText}>
+                                        {billingBusy
+                                            ? 'Opening...'
+                                            : billingProvider === 'revenuecat'
+                                                ? `Subscribe on ${Platform.OS === 'ios' ? 'App Store' : 'Google Play'}`
+                                                : 'Upgrade to Pro'}
+                                    </Label>
+                                </Pressable>
+                            ) : null}
+
+                            {canRestorePurchases ? (
+                                <Pressable
+                                    style={[styles.secondaryButton, (billingBusy || busy || loading || loadingBillingState) && styles.buttonDisabled]}
+                                    onPress={handleRestorePurchasesPress}
+                                    disabled={billingBusy || busy || loading || loadingBillingState}
+                                >
+                                    <Label style={styles.secondaryButtonText}>
+                                        {billingBusy ? 'Working...' : 'Restore Purchases'}
+                                    </Label>
+                                </Pressable>
+                            ) : null}
                         </>
                     )}
                 </Card>
@@ -370,24 +403,53 @@ export default function PricingScreen() {
 
                     <Card>
                         <Label>Pro</Label>
-                        <Heading>Unlimited</Heading>
-                        <BodyText>Built for active GMs, designers, and long-running projects.</BodyText>
+                        <Heading>
+                            {billingProvider === 'revenuecat' && currentPackage?.priceString
+                                ? currentPackage.priceString
+                                : isNativePlanPreview
+                                    ? 'Coming Soon on Mobile'
+                                    : 'Unlimited'}
+                        </Heading>
+                        <BodyText>
+                            {billingProvider === 'revenuecat'
+                                ? `${currentPackage?.title ?? 'Native mobile subscription'} managed through ${Platform.OS === 'ios' ? 'the App Store' : 'Google Play'}.`
+                                : isNativePlanPreview
+                                ? 'Native subscriptions are not available in this build yet.'
+                                : 'Built for active GMs, designers, and long-running projects.'}
+                        </BodyText>
 
                         <View style={styles.featureList}>
                             <BodyText>• Unlimited saved projects</BodyText>
                             <BodyText>• Campaign Hub access</BodyText>
                             <BodyText>• Linked campaign workflows</BodyText>
-                            <BodyText>• Future premium features</BodyText>
+                            <BodyText>
+                                • {isNativePlanPreview ? 'Native subscription unlock is coming later' : 'Future premium features'}
+                            </BodyText>
                         </View>
                     </Card>
                 </View>
 
                 <Card>
                     <Label>Current Pricing</Label>
-                    <Heading>$4.99 / month</Heading>
+                    <Heading>
+                        {billingProvider === 'revenuecat' && currentPackage?.priceString
+                            ? `${currentPackage.priceString} / month`
+                            : isNativePlanPreview
+                                ? 'Mobile Pro coming soon'
+                                : '$4.99 / month'}
+                    </Heading>
                     <BodyText>
-                        Monthly Pro unlocks unlimited saves and Campaign Hub organization.
+                        {billingProvider === 'revenuecat'
+                            ? `RevenueCat offering: ${currentPackage?.productIdentifier ?? 'No active product found yet.'}`
+                            : isNativePlanPreview
+                            ? 'The current mobile beta is free while native subscriptions are being wired up.'
+                            : 'Monthly Pro unlocks unlimited saves and Campaign Hub organization.'}
                     </BodyText>
+                    {nativeEntitlement?.latestExpirationDate ? (
+                        <BodyText style={styles.subtleText}>
+                            Latest store expiration on record: {formatPlanDate(nativeEntitlement.latestExpirationDate)}
+                        </BodyText>
+                    ) : null}
                 </Card>
 
                 <View style={styles.footerActions}>

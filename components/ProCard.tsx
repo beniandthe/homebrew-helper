@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { BodyText, Label } from '@/components/AppText';
 import { Card } from '@/components/Card';
 import { Spacing } from '@/constants/theme';
+import { getFreeLimitUpsell, getPlanActionLabel, getPlanSummaryCopy, isNativePlanPreview } from '@/lib/subscriptionUi';
 
 type ProCardProps = {
     isPro: boolean;
@@ -20,33 +21,40 @@ export function ProCard({
     showLockedMessage = false,
 }: ProCardProps) {
     const isLocked = !isPro && savedProjectCount >= maxFreeSaves;
+    const freeLimitUpsell = getFreeLimitUpsell(maxFreeSaves);
 
     return (
         <Card>
             <Label>{isPro ? 'Pro Plan' : 'Free Plan'}</Label>
 
             <BodyText>
-                {isPro
-                    ? 'Unlimited saves enabled.'
-                    : `You have used ${savedProjectCount}/${maxFreeSaves} free saves.`}
+                {getPlanSummaryCopy(savedProjectCount, maxFreeSaves, isPro)}
             </BodyText>
 
             {showLockedMessage && isLocked ? (
                 <View style={styles.lockedBlock}>
                     <Label>Free plan limit reached</Label>
                     <BodyText>
-                        You have used all {maxFreeSaves} free saves. Upgrade to Pro to create additional
-                        projects.
+                        {freeLimitUpsell.message}
                     </BodyText>
                 </View>
             ) : null}
 
             {!isPro ? (
-                <Pressable style={styles.proButton} onPress={onUpgradePress}>
-                    <Label style={styles.proButtonText}>
-                        {isLocked ? 'Upgrade to Keep Saving' : 'Upgrade to Pro'}
-                    </Label>
-                </Pressable>
+                <>
+                    {isNativePlanPreview ? (
+                        <BodyText style={styles.helperText}>
+                            Mobile beta currently includes the free plan. Native Pro subscriptions and
+                            Campaign Hub are coming in a later release.
+                        </BodyText>
+                    ) : null}
+
+                    <Pressable style={styles.proButton} onPress={onUpgradePress}>
+                        <Label style={styles.proButtonText}>
+                            {isLocked && !isNativePlanPreview ? 'Upgrade to Keep Saving' : getPlanActionLabel()}
+                        </Label>
+                    </Pressable>
+                </>
             ) : null}
         </Card>
     );
@@ -56,6 +64,10 @@ const styles = StyleSheet.create({
     lockedBlock: {
         gap: Spacing.xs,
         marginTop: Spacing.sm,
+    },
+    helperText: {
+        marginTop: Spacing.sm,
+        opacity: 0.8,
     },
     proButton: {
         backgroundColor: '#6d28d9',

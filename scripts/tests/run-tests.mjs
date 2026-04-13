@@ -152,7 +152,8 @@ results.push(
     const generator = read('app/(tabs)/generator.tsx');
     const quest = read('app/(tabs)/quest.tsx');
 
-    assert.match(campaign, /Campaign Hub is Pro-only/);
+    assert.match(campaign, /getCampaignHubUpsell/);
+    assert.match(campaign, /UpgradeBanner/);
     assert.match(campaign, /if \(!loadingSession && !isPro\)/);
 
     assert.doesNotMatch(xp, /if \(!loadingSession && !isPro\)/);
@@ -171,6 +172,7 @@ results.push(
   await test('Supabase and Stripe integration contracts remain intact', async () => {
     const supabase = read('lib/supabase.ts');
     const pricing = read('app/pricing.tsx');
+    const billingContext = read('contexts/BillingContext.tsx');
     const schema = read('supabase/schema.sql');
     const checkoutFn = read('supabase/functions/create-checkout-session/index.ts');
     const portalFn = read('supabase/functions/create-customer-portal-session/index.ts');
@@ -179,9 +181,12 @@ results.push(
     assert.match(supabase, /createClient\(supabaseUrl, supabaseAnonKey/);
     assert.match(supabase, /detectSessionInUrl:\s*Platform\.OS === 'web'/);
 
-    assert.match(pricing, /create-checkout-session/);
-    assert.match(pricing, /create-customer-portal-session/);
-    assert.match(pricing, /window\.location\.href = data\.url/);
+    assert.match(pricing, /useBilling\(\)/);
+    assert.match(pricing, /purchasePro/);
+    assert.match(pricing, /manageSubscription/);
+    assert.match(billingContext, /create-checkout-session/);
+    assert.match(billingContext, /create-customer-portal-session/);
+    assert.match(billingContext, /window\.location\.href = data\.url/);
     assert.match(checkoutFn, /success_url: `\$\{appUrl\}\/pricing\?checkout=success/);
     assert.match(portalFn, /return_url: `\$\{appUrl\}\/pricing`/);
     assert.match(webhookFn, /subscription\.items\.data/);
@@ -197,12 +202,16 @@ results.push(
     const billing = read('lib/billing.ts');
     const projectAccess = read('lib/projectAccess.ts');
     const context = read('contexts/AppStateContext.tsx');
+    const billingContext = read('contexts/BillingContext.tsx');
     const pricing = read('app/pricing.tsx');
     const account = read('app/(tabs)/account.tsx');
     const campaign = read('app/(tabs)/campaign.tsx');
     const encounters = read('app/(tabs)/encounters.tsx');
     const generator = read('app/(tabs)/generator.tsx');
     const quest = read('app/(tabs)/quest.tsx');
+    const revenueCat = read('lib/revenueCat.ts');
+    const revenueCatWebhook = read('supabase/functions/revenuecat-webhook/index.ts');
+    const revenueCatSync = read('supabase/functions/sync-revenuecat-customer/index.ts');
     const xp = read('app/(tabs)/xp.tsx');
 
     assert.match(billing, /export function hasActiveProAccess/);
@@ -213,13 +222,20 @@ results.push(
     assert.match(context, /hasActiveProAccess/);
     assert.match(context, /getPendingBillingReturn/);
     assert.match(pricing, /hasActiveProAccess/);
-    assert.match(pricing, /markBillingReturnPending/);
+    assert.match(pricing, /useBilling\(\)/);
+    assert.match(billingContext, /markBillingReturnPending/);
+    assert.match(billingContext, /syncRevenueCatProfile/);
     assert.match(account, /billingProfile/);
+    assert.match(account, /useBilling\(\)/);
     assert.match(campaign, /fetchLatestSaveAccess/);
     assert.match(encounters, /fetchLatestSaveAccess/);
     assert.match(generator, /fetchLatestSaveAccess/);
     assert.match(quest, /fetchLatestSaveAccess/);
     assert.match(xp, /fetchLatestSaveAccess/);
+    assert.match(revenueCat, /react-native-purchases/);
+    assert.match(revenueCat, /Purchases\.purchasePackage/);
+    assert.match(revenueCatWebhook, /REVENUECAT_WEBHOOK_AUTH_HEADER/);
+    assert.match(revenueCatSync, /fetchRevenueCatSubscriber/);
     assert.doesNotMatch(account, /supabase\.auth\.onAuthStateChange/);
     assert.doesNotMatch(campaign, /Boolean\(profileData\?\.is_pro\)/);
     assert.doesNotMatch(encounters, /Boolean\(profileData\?\.is_pro\)/);

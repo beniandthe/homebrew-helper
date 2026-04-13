@@ -17,7 +17,13 @@ create table if not exists public.profiles (
   canceled_at timestamptz null,
   stripe_customer_id text null,
   stripe_subscription_id text null,
-  subscription_status text null
+  subscription_status text null,
+  billing_provider text null,
+  billing_product_id text null,
+  billing_entitlement_id text null,
+  billing_store text null,
+  billing_last_synced_at timestamptz null,
+  revenuecat_app_user_id text null
 );
 
 -- If table already existed before these columns, ensure they exist:
@@ -28,7 +34,13 @@ alter table public.profiles
   add column if not exists canceled_at timestamptz null,
   add column if not exists stripe_customer_id text null,
   add column if not exists stripe_subscription_id text null,
-  add column if not exists subscription_status text null;
+  add column if not exists subscription_status text null,
+  add column if not exists billing_provider text null,
+  add column if not exists billing_product_id text null,
+  add column if not exists billing_entitlement_id text null,
+  add column if not exists billing_store text null,
+  add column if not exists billing_last_synced_at timestamptz null,
+  add column if not exists revenuecat_app_user_id text null;
 
 create unique index if not exists idx_profiles_stripe_customer_id
   on public.profiles (stripe_customer_id)
@@ -37,6 +49,10 @@ create unique index if not exists idx_profiles_stripe_customer_id
 create unique index if not exists idx_profiles_stripe_subscription_id
   on public.profiles (stripe_subscription_id)
   where stripe_subscription_id is not null;
+
+create unique index if not exists idx_profiles_revenuecat_app_user_id
+  on public.profiles (revenuecat_app_user_id)
+  where revenuecat_app_user_id is not null;
 
 create index if not exists idx_projects_user_id
   on public.projects (user_id);

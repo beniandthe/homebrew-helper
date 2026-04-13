@@ -2,13 +2,16 @@ import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { useAppState } from '@/contexts/AppStateContext';
+import { useBilling } from '@/contexts/BillingContext';
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Heading, Label } from '@/components/AppText';
 import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { buildAuthRedirectUrl } from '@/lib/authRedirect';
+import { formatBillingProvider, formatBillingStore } from '@/lib/billing';
 import { supabase } from '@/lib/supabase';
+import { isNativePlanPreview } from '@/lib/subscriptionUi';
 
 function formatPlanDate(value: string | null) {
   if (!value) return null;
@@ -34,6 +37,17 @@ export default function AccountScreen() {
   const [message, setMessage] = useState('');
 
   const { session, userId, isSignedIn, isPro, billingProfile, loading, refreshAppState } = useAppState();
+  const {
+    billingBusy,
+    billingProvider,
+    canManageSubscription,
+    canRestorePurchases,
+    currentPackage,
+    nativeEntitlement,
+    loadingBillingState,
+    manageSubscription,
+    restorePurchases,
+  } = useBilling();
 
   const userEmail = session?.user?.email ?? '';
   const cancelAtPeriodEnd = Boolean(billingProfile?.cancel_at_period_end);
@@ -187,7 +201,7 @@ export default function AccountScreen() {
   const formattedPeriodEnd = formatPlanDate(currentPeriodEnd);
 
   function renderPlanSummary() {
-    if (loading) {
+    if (loading || loadingBillingState) {
       return 'Loading plan...';
     }
 
@@ -202,12 +216,37 @@ export default function AccountScreen() {
     return 'Plan: Free';
   }
 
+  async function handleManageSubscription() {
+    try {
+      setMessage('');
+      await manageSubscription();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to manage your subscription.');
+    }
+  }
+
+  async function handleRestorePurchases() {
+    try {
+      setMessage('');
+      const result = await restorePurchases();
+
+      if (result.status === 'cancelled') {
+        setMessage('Restore canceled.');
+        return;
+      }
+
+      setMessage('Purchases restored successfully.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to restore purchases.');
+    }
+  }
+
   return (
     <Screen>
       <Card>
         <Heading>Account & Pro</Heading>
         <BodyText>
-          Authentication, account status, and Pro entitlement testing.
+          Authentication, account status, and subscription access.
         </BodyText>
       </Card>
 
@@ -232,7 +271,7 @@ export default function AccountScreen() {
         <>
           <Card>
             <Label>Plan</Label>
-            {loading ? (
+            {loading || loadingBillingState ? (
               <View style={styles.row}>
                 <ActivityIndicator />
                 <BodyText>Loading plan...</BodyText>
@@ -245,14 +284,60 @@ export default function AccountScreen() {
                     Subscription access remains active until {formattedPeriodEnd}.
                   </BodyText>
                 ) : null}
+
+                <BodyText style={styles.subtleText}>
+                  Provider: {billingProvider === 'none' ? (isNativePlanPreview ? 'Mobile beta preview' : 'Not configured') : formatBillingProvider(billingProvider)}
+                </BodyText>
+
+                {billingProfile?.billing_store ? (
+                  <BodyText style={styles.subtleText}>
+                    Store: {formatBillingStore(billingProfile.billing_store)}
+                  </BodyText>
+                ) : null}
+
+                {currentPackage?.priceString ? (
+                  <BodyText style={styles.subtleText}>
+                    Current offer: {currentPackage.priceString} / month
+                  </BodyText>
+                ) : null}
+
+                {nativeEntitlement?.latestExpirationDate ? (
+                  <BodyText style={styles.subtleText}>
+                    Latest store expiration: {formatPlanDate(nativeEntitlement.latestExpirationDate)}
+                  </BodyText>
+                ) : null}
               </>
             )}
 
+            {canManageSubscription ? (
+              <Pressable
+                style={[styles.buttonSecondary, (billingBusy || busy || loading || loadingBillingState) && styles.buttonDisabled]}
+                onPress={handleManageSubscription}
+                disabled={billingBusy || busy || loading || loadingBillingState}
+              >
+                <Label style={styles.buttonText}>
+                  {billingBusy ? 'Working...' : 'Manage Subscription'}
+                </Label>
+              </Pressable>
+            ) : null}
+
+            {canRestorePurchases ? (
+              <Pressable
+                style={[styles.buttonSecondary, (billingBusy || busy || loading || loadingBillingState) && styles.buttonDisabled]}
+                onPress={handleRestorePurchases}
+                disabled={billingBusy || busy || loading || loadingBillingState}
+              >
+                <Label style={styles.buttonText}>
+                  {billingBusy ? 'Working...' : 'Restore Purchases'}
+                </Label>
+              </Pressable>
+            ) : null}
+
             {enableDevBilling ? (
               <Pressable
-                style={[styles.button, busy && styles.buttonDisabled]}
+                style={[styles.button, (busy || billingBusy) && styles.buttonDisabled]}
                 onPress={handleTogglePro}
-                disabled={busy || loading}
+                disabled={busy || billingBusy || loading || loadingBillingState}
               >
                 <Label style={styles.buttonText}>
                   {busy
@@ -270,9 +355,9 @@ export default function AccountScreen() {
             <BodyText>{userEmail}</BodyText>
 
             <Pressable
-              style={[styles.buttonSecondary, busy && styles.buttonDisabled]}
+              style={[styles.buttonSecondary, (busy || billingBusy) && styles.buttonDisabled]}
               onPress={handleSignOut}
-              disabled={busy}
+              disabled={busy || billingBusy}
             >
               <Label style={styles.buttonText}>Sign Out</Label>
             </Pressable>
@@ -302,26 +387,26 @@ export default function AccountScreen() {
 
             <View style={styles.actionRow}>
               <Pressable
-                style={[styles.button, busy && styles.buttonDisabled]}
+                style={[styles.button, (busy || billingBusy) && styles.buttonDisabled]}
                 onPress={handleSignIn}
-                disabled={busy}
+                disabled={busy || billingBusy}
               >
                 <Label style={styles.buttonText}>{busy ? 'Working...' : 'Sign In'}</Label>
               </Pressable>
 
               <Pressable
-                style={[styles.buttonSecondary, busy && styles.buttonDisabled]}
+                style={[styles.buttonSecondary, (busy || billingBusy) && styles.buttonDisabled]}
                 onPress={handleSignUp}
-                disabled={busy}
+                disabled={busy || billingBusy}
               >
                 <Label style={styles.buttonText}>Sign Up</Label>
               </Pressable>
             </View>
 
             <Pressable
-              style={[styles.buttonSecondary, busy && styles.buttonDisabled]}
+              style={[styles.buttonSecondary, (busy || billingBusy) && styles.buttonDisabled]}
               onPress={handleResendConfirmation}
-              disabled={busy}
+              disabled={busy || billingBusy}
             >
               <Label style={styles.buttonText}>Resend Verification Email</Label>
             </Pressable>

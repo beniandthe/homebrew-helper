@@ -6,11 +6,13 @@ import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { useAppState } from '@/contexts/AppStateContext';
 import { Colors, Spacing } from '@/constants/theme';
+import { getHomeUpgradeCopy, getPlanSummaryCopy } from '@/lib/subscriptionUi';
 
 export default function HomeScreen() {
   const { isPro, savedProjectCount, loading } = useAppState();
 
   const maxFreeSaves = 3;
+  const homeUpgradeCopy = getHomeUpgradeCopy(maxFreeSaves);
 
   function goTo(
     path:
@@ -58,11 +60,9 @@ export default function HomeScreen() {
           {loading ? (
             <BodyText>Checking your account status...</BodyText>
           ) : isPro ? (
-            <BodyText>Pro plan active. Unlimited saves are available to your account.</BodyText>
+            <BodyText>{getPlanSummaryCopy(savedProjectCount, maxFreeSaves, true)}</BodyText>
           ) : (
-            <BodyText>
-              Free plan active. You have used {savedProjectCount}/{maxFreeSaves} saved projects.
-            </BodyText>
+            <BodyText>{getPlanSummaryCopy(savedProjectCount, maxFreeSaves, false)}</BodyText>
           )}
         </Card>
 
@@ -136,15 +136,14 @@ export default function HomeScreen() {
         {!isPro ? (
           <Pressable onPress={() => goTo('/pricing')}>
             <View style={styles.upgradeCard}>
-              <Label style={styles.upgradeLabel}>Upgrade to Pro</Label>
-              <Heading style={styles.upgradeTitle}>Unlock the full guild.</Heading>
+              <Label style={styles.upgradeLabel}>{homeUpgradeCopy.label}</Label>
+              <Heading style={styles.upgradeTitle}>{homeUpgradeCopy.title}</Heading>
               <BodyText style={styles.upgradeText}>
-                Remove the 3-project limit and keep unlimited campaigns, encounters, treasure sets,
-                and quest concepts.
+                {homeUpgradeCopy.text}
               </BodyText>
 
               <View style={styles.upgradeButton}>
-                <Label style={styles.upgradeButtonText}>View Plans</Label>
+                <Label style={styles.upgradeButtonText}>{homeUpgradeCopy.buttonLabel}</Label>
               </View>
             </View>
           </Pressable>

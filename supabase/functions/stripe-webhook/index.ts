@@ -1,5 +1,6 @@
 import Stripe from 'npm:stripe@18.4.0';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { applyProfileBillingUpdate } from '../_shared/billing-profile.ts';
 
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
   apiVersion: '2025-06-30.basil',
@@ -63,6 +64,11 @@ Deno.serve(async (req) => {
         cancel_at_period_end: subscription.cancel_at_period_end,
         current_period_end: currentPeriodEnd,
         canceled_at: canceledAt,
+        billing_provider: 'stripe' as const,
+        billing_product_id: subscription.items.data[0]?.price?.id ?? null,
+        billing_entitlement_id: 'pro',
+        billing_store: 'web',
+        billing_last_synced_at: new Date().toISOString(),
       };
 
       let targetUserId = userId ?? null;
@@ -104,11 +110,7 @@ Deno.serve(async (req) => {
         isEntitled,
       });
 
-      await supabaseAdmin.from('profiles').update(payload).eq('id', targetUserId);
-
-      if (!isEntitled) {
-        await supabaseAdmin.rpc('downgrade_to_free_and_trim_projects', { target_user_id: targetUserId });
-      }
+      await applyProfileBillingUpdate(supabaseAdmin, targetUserId, payload);
     };
 
     switch (event.type) {
