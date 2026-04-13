@@ -14,7 +14,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.benjaminrossman.rpgtoolkit"
+      "bundleIdentifier": "com.benjaminrossman.rpgtoolkit",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.benjaminrossman.rpgtoolkit"
