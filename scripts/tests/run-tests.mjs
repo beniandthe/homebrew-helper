@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
+import { createRequire } from 'node:module';
 import ts from 'typescript';
 
 const repoRoot = process.cwd();
+const nodeRequire = createRequire(import.meta.url);
+const tsModuleCache = new Map();
 
 function runTypecheck() {
   const configPath = ts.findConfigFile(repoRoot, ts.sys.fileExists, 'tsconfig.json');
@@ -35,6 +39,75 @@ function runTypecheck() {
 
 function read(file) {
   return fs.readFileSync(path.join(repoRoot, file), 'utf8');
+}
+
+function resolveLocalModule(basePath) {
+  const candidates = [
+    basePath,
+    `${basePath}.ts`,
+    `${basePath}.tsx`,
+    `${basePath}.js`,
+    `${basePath}.mjs`,
+    `${basePath}.json`,
+    path.join(basePath, 'index.ts'),
+    path.join(basePath, 'index.tsx'),
+    path.join(basePath, 'index.js'),
+    path.join(basePath, 'index.mjs'),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`Unable to resolve module: ${basePath}`);
+}
+
+function loadTsModule(modulePath) {
+  const resolvedPath = resolveLocalModule(modulePath);
+
+  if (!resolvedPath.endsWith('.ts') && !resolvedPath.endsWith('.tsx')) {
+    return nodeRequire(resolvedPath);
+  }
+
+  if (tsModuleCache.has(resolvedPath)) {
+    return tsModuleCache.get(resolvedPath);
+  }
+
+  const source = fs.readFileSync(resolvedPath, 'utf8');
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+      jsx: ts.JsxEmit.ReactJSX,
+      esModuleInterop: true,
+      moduleResolution: ts.ModuleResolutionKind.NodeJs,
+    },
+    fileName: resolvedPath,
+  });
+
+  const module = { exports: {} };
+  tsModuleCache.set(resolvedPath, module.exports);
+
+  const localRequire = (specifier) => {
+    if (specifier.startsWith('@/')) {
+      return loadTsModule(path.join(repoRoot, specifier.slice(2)));
+    }
+
+    if (specifier.startsWith('./') || specifier.startsWith('../')) {
+      return loadTsModule(path.resolve(path.dirname(resolvedPath), specifier));
+    }
+
+    return nodeRequire(specifier);
+  };
+
+  const wrapped = `(function (exports, require, module, __filename, __dirname) { ${transpiled.outputText}\n})`;
+  const compiled = vm.runInThisContext(wrapped, { filename: resolvedPath });
+  compiled(module.exports, localRequire, module, resolvedPath, path.dirname(resolvedPath));
+
+  tsModuleCache.set(resolvedPath, module.exports);
+  return module.exports;
 }
 
 async function test(name, fn) {
@@ -80,6 +153,273 @@ const results = [];
 results.push(
   await test('TypeScript compiles without errors', async () => {
     runTypecheck();
+  })
+);
+
+results.push(
+  await test('D&D campaign link context derives threat, loot, and party pressure correctly', async () => {
+    const { buildDndCampaignLinkContext, getDndRewardRecipientCandidates } = loadTsModule('lib/dndCampaignLinkContext');
+
+    const context = buildDndCampaignLinkContext({
+      campaignName: 'Ashes of Dunmere',
+      partyName: 'Lantern Company',
+      mainFaction: 'Temple of the Dawn',
+      levelBand: 'Tier 2 (levels 5-10)',
+      currentObjective: 'seal the crypt breach',
+      partyRoster: [
+        {
+          id: 'pc-1',
+          name: 'Theren',
+          species: 'Human',
+          className: 'Fighter',
+          background: 'Soldier',
+          level: '5',
+          armorClass: '18',
+          hitPoints: '44',
+          passivePerception: '12',
+          signatureItem: 'Longsword',
+          notes: 'Leads the front line.',
+        },
+        {
+          id: 'pc-2',
+          name: 'Iria',
+          species: 'Elf',
+          className: 'Wizard',
+          background: 'Sage',
+          level: '6',
+          armorClass: '14',
+          hitPoints: '31',
+          passivePerception: '15',
+          signatureItem: 'Spellbook',
+          notes: 'Primary ritualist.',
+        },
+      ],
+      sharedInventory: [
+        {
+          id: 'item-1',
+          name: 'Potion of Healing',
+          category: 'Consumable',
+          quantity: '2',
+          holder: 'Shared',
+          rarity: 'Common',
+          attunement: 'No',
+          notes: '',
+        },
+        {
+          id: 'item-2',
+          name: 'Pearl of Power',
+          category: 'Magic item',
+          quantity: '1',
+          holder: 'Iria',
+          rarity: 'Rare',
+          attunement: 'Yes',
+          notes: '',
+        },
+      ],
+      partyTreasury: {
+        gp: '325',
+        sp: '40',
+        cp: '',
+        special: 'opal signet',
+        notes: '',
+      },
+      npcRoster: [
+        {
+          id: 'npc-1',
+          name: 'Sister Maelin',
+          species: 'Human',
+          role: 'Patron',
+          affiliation: 'Temple of the Dawn',
+          disposition: 'Ally',
+          hook: 'Needs the breach sealed before the festival.',
+        },
+      ],
+      threatClocks: [
+        {
+          id: 'clock-1',
+          sourceProjectId: 'enc-1',
+          projectName: 'Crypt Hold',
+          title: 'Ghoul pressure beneath the abbey',
+          status: 'escalating',
+          segmentsFilled: 4,
+          segmentsTotal: 6,
+          linkedNpcId: 'npc-1',
+          linkedNpcName: 'Sister Maelin',
+          linkedFaction: 'Temple of the Dawn',
+          escalationTag: 'Under Siege',
+          difficulty: 'Hard',
+          enemyRole: 'Undead host',
+          verdict: 'Dangerous',
+          fallout: 'Pilgrims stop arriving by dusk.',
+          latestBeat: 'The crypt doors crack open after compline.',
+          updatedAt: '2026-04-14T00:00:00.000Z',
+        },
+      ],
+    });
+
+    assert.ok(context);
+    assert.equal(context.partySize, 2);
+    assert.equal(context.averageLevel, 6);
+    assert.equal(context.tierLabel, 'Tier 2');
+    assert.match(context.treasurySummary, /325 gp/);
+    assert.equal(context.attunementItems[0], 'Pearl of Power');
+    assert.equal(context.consumableItems[0], 'Potion of Healing');
+    assert.match(context.threatSummaryLines[0], /Sister Maelin/);
+    assert.match(context.npcPressureLines[0], /Under Siege/);
+    assert.match(context.factionPressureLines[0], /Temple of the Dawn/);
+    assert.match(context.defaultEncounterNote, /seal the crypt breach/);
+    assert.match(context.defaultTreasureNote, /Attunement slots are already under pressure/);
+
+    const arcaneCandidates = getDndRewardRecipientCandidates(context, 'arcane');
+    assert.deepEqual(
+      arcaneCandidates.map((entry) => entry.name),
+      ['Iria']
+    );
+  })
+);
+
+results.push(
+  await test('D&D ledger readers normalize threat clocks and treasury awards safely', async () => {
+    const { readDndThreatClocks, readDndTreasuryAwards } = loadTsModule('lib/dndCampaignLedger');
+
+    const clocks = readDndThreatClocks([
+      {
+        id: 'clock-1',
+        sourceProjectId: 'enc-1',
+        projectName: 'Crypt Hold',
+        title: 'Abbey panic',
+        status: 'bad-status',
+        segmentsFilled: 9,
+        segmentsTotal: 4,
+        linkedNpcId: 'npc-1',
+        linkedNpcName: 'Sister Maelin',
+        linkedFaction: 'Temple of the Dawn',
+        escalationTag: 'Exposed',
+        difficulty: 'Hard',
+        enemyRole: 'Ghoul pack',
+        verdict: 'Dangerous',
+        fallout: 'The bells toll through the district.',
+        latestBeat: 'Refugees flood the square.',
+        updatedAt: '2026-04-14T00:00:00.000Z',
+      },
+    ]);
+
+    assert.equal(clocks.length, 1);
+    assert.equal(clocks[0].status, 'active');
+    assert.equal(clocks[0].segmentsTotal, 4);
+    assert.equal(clocks[0].segmentsFilled, 4);
+    assert.equal(clocks[0].linkedFaction, 'Temple of the Dawn');
+
+    const awards = readDndTreasuryAwards([
+      {
+        id: 'award-1',
+        sourceProjectId: 'loot-1',
+        projectName: 'River Cache',
+        amountGp: -250,
+        note: 'Boss hoard',
+        updatedAt: '2026-04-14T00:00:00.000Z',
+      },
+    ]);
+
+    assert.equal(awards.length, 1);
+    assert.equal(awards[0].amountGp, 0);
+  })
+);
+
+results.push(
+  await test('D&D workbench snapshot summarizes roster and inventory without losing campaign signal', async () => {
+    const { buildDndCampaignWorkbenchSnapshot } = loadTsModule('lib/dnd5eCampaignKit');
+
+    const snapshot = buildDndCampaignWorkbenchSnapshot({
+      partyRoster: [
+        {
+          id: 'pc-1',
+          name: 'Theren',
+          species: 'Human',
+          className: 'Fighter',
+          background: 'Soldier',
+          level: '5',
+          armorClass: '18',
+          hitPoints: '44',
+          passivePerception: '12',
+          signatureItem: 'Longsword',
+          notes: '',
+        },
+        {
+          id: 'pc-2',
+          name: 'Iria',
+          species: 'Elf',
+          className: 'Wizard',
+          background: 'Sage',
+          level: '6',
+          armorClass: '14',
+          hitPoints: '31',
+          passivePerception: '15',
+          signatureItem: 'Spellbook',
+          notes: '',
+        },
+      ],
+      inventory: [
+        {
+          id: 'item-1',
+          name: 'Potion of Healing',
+          category: 'Consumable',
+          quantity: '2',
+          holder: 'Shared',
+          rarity: 'Common',
+          attunement: 'No',
+          notes: '',
+        },
+        {
+          id: 'item-2',
+          name: 'Pearl of Power',
+          category: 'Magic item',
+          quantity: '1',
+          holder: 'Iria',
+          rarity: 'Rare',
+          attunement: 'Yes',
+          notes: '',
+        },
+      ],
+      treasury: {
+        gp: '325',
+        sp: '40',
+        cp: '',
+        special: 'opal signet',
+        notes: '',
+      },
+      npcRoster: [
+        {
+          id: 'npc-1',
+          name: 'Sister Maelin',
+          species: 'Human',
+          role: 'Patron',
+          affiliation: 'Temple of the Dawn',
+          disposition: 'Ally',
+          hook: '',
+        },
+        {
+          id: 'npc-2',
+          name: 'Roth Vane',
+          species: 'Human',
+          role: 'Rival',
+          affiliation: 'Red Knives',
+          disposition: 'Hostile',
+          hook: '',
+        },
+      ],
+    });
+
+    assert.equal(snapshot.partyCount, 2);
+    assert.equal(snapshot.inventoryCount, 2);
+    assert.equal(snapshot.npcCount, 2);
+    assert.match(snapshot.averageLevelLabel, /5\.5|5/);
+    assert.match(snapshot.highestPassiveLabel, /Iria \(15\)/);
+    assert.match(snapshot.treasurySummary, /325 gp/);
+    assert.ok(snapshot.partyCoverage.some((entry) => entry.includes('Front line covered by Theren')));
+    assert.ok(snapshot.partyCoverage.some((entry) => entry.includes('Arcane pressure handled by Iria')));
+    assert.ok(snapshot.inventoryHighlights.some((entry) => entry.includes('magic item')));
+    assert.ok(snapshot.npcHighlights.some((entry) => entry.includes('hostile')));
   })
 );
 
@@ -165,6 +505,26 @@ results.push(
     assert.match(encounters, /UpgradeBanner/);
     assert.match(generator, /UpgradeBanner/);
     assert.match(quest, /UpgradeBanner/);
+  })
+);
+
+results.push(
+  await test('D&D screens expose promotion and escalation hooks for linked campaign workflows', async () => {
+    const campaign = read('app/(tabs)/campaign.tsx');
+    const encounters = read('app/(tabs)/encounters.tsx');
+    const generator = read('app/(tabs)/generator.tsx');
+    const workbench = read('components/DndCampaignWorkbench.tsx');
+
+    assert.match(campaign, /Escalation Watch/);
+    assert.match(campaign, /Recent Coin Awards/);
+    assert.match(encounters, /Escalated NPC/);
+    assert.match(encounters, /Faction Under Pressure/);
+    assert.match(encounters, /Escalation Tag/);
+    assert.match(generator, /Assign promoted items to/);
+    assert.match(generator, /Promote Featured Item/);
+    assert.match(generator, /Post Coin to Treasury/);
+    assert.match(workbench, /Assigned gear:/);
+    assert.match(workbench, /Direct pressure:/);
   })
 );
 
