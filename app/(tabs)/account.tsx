@@ -249,14 +249,14 @@ export default function AccountScreen() {
       <Card>
         <Heading>Account & Pro</Heading>
         <BodyText>
-          Authentication, account status, and subscription access.
+          Sign-in, plan status, and subscription access.
         </BodyText>
       </Card>
 
       <Card>
         <Label>Current status</Label>
         <BodyText>
-          {configured ? 'Supabase connected.' : 'Supabase not configured yet.'}
+          {configured ? 'Account service ready.' : 'Account service is not configured yet.'}
         </BodyText>
         {loading ? (
           <View style={styles.row}>
@@ -273,7 +273,7 @@ export default function AccountScreen() {
       {activeSystem.attribution ? (
         <RulesetIdentityCard
           system={activeSystem}
-          label="Current Ruleset"
+          label="Current Game"
           showIdentity={false}
           showAttribution
         />

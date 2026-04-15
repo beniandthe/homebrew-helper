@@ -94,7 +94,7 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
       encounters: 'Battle',
       generator: 'Loot',
       quest: 'Adventure',
-      projects: 'Projects',
+      projects: 'Saved',
       account: 'Account',
     },
     home: {
@@ -103,8 +103,8 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
       heroSubtitle:
         'A flexible prep suite for custom worlds, house rules, and fantasy tables that want familiar structure without borrowing someone else\'s canon.',
       primaryCta: 'Plan Advancement',
-      sectionTitle: 'Prep Workspaces',
-      sectionSubtitle: 'Choose a workspace tuned for original fantasy campaigns, clearer battles, useful loot, and practical adventure hooks.',
+      sectionTitle: 'Prep Boards',
+      sectionSubtitle: 'Choose the board that fits original fantasy campaigns, clearer battles, useful loot, and practical adventure hooks.',
       campaign: {
         label: 'Campaign',
         title: 'Campaign Hub',
@@ -131,15 +131,15 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
         body: 'Create patrons, objectives, twists, and fallout that sound like adventures players would actually hear at the table.',
       },
       projects: {
-        label: 'Projects',
-        title: 'Prep Archive',
-        body: 'Reopen saved prep, duplicate strong ideas, and keep half-finished worldbuilding from slipping away.',
+        label: 'Saved',
+        title: 'Saved Prep',
+        body: 'Reopen saved plans, revisit strong ideas, and keep half-finished worldbuilding close at hand.',
       },
       proTitle: 'Guildmaster Access',
       proBody: 'Your account has full access. Continue building without save limits.',
     },
     modeIdentity: {
-      title: 'Homebrew mode keeps the toolkit flexible without borrowing someone else\'s canon.',
+      title: 'Homebrew keeps the app flexible without borrowing someone else\'s canon.',
       body:
         'It stays grounded in familiar fantasy prep structure while leaving names, factions, monsters, and progression logic open to your own setting and house rules.',
       highlights: [
@@ -151,10 +151,10 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
     campaign: {
       title: 'Campaign Hub',
       description:
-        'Organize campaign identity, party focus, faction pressure, session prep, and linked original-fantasy projects.',
-      selectorLabel: 'Active Ruleset',
+        'Organize campaign identity, party focus, faction pressure, session prep, and saved original-fantasy notes.',
+      selectorLabel: 'Game',
       selectorHelper:
-        'Choose the ruleset language the toolkit should use across tabs and saved projects.',
+        'Choose the game voice the app should use across tabs and saves.',
       groupLabel: 'Party Name / Group',
       groupPlaceholder: 'The Ashen Company',
       notesPlaceholder: 'Recap, unresolved hooks, next-scene prep, NPC reminders...',
@@ -182,8 +182,8 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
         'Build practical adventure structure with hooks, twists, fallout, alternate routes, and faction pressure.',
     },
     projects: {
-      title: 'My Projects',
-      description: 'View and manage saved calculator and generator projects.',
+      title: 'Saved Prep',
+      description: 'View and manage your saved plans, encounters, treasure, and campaign notes.',
     },
   },
   dnd5e: {
@@ -197,18 +197,18 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
       encounters: 'Encounter',
       generator: 'Treasure',
       quest: 'Adventure',
-      projects: 'Projects',
+      projects: 'Saved',
       account: 'Account',
     },
     home: {
       badge: 'SRD 5.2.1 Toolkit',
       heroTitle: 'Prep like a real 5e DM with class lanes, dungeon pressure, and magic-item rewards.',
       heroSubtitle:
-        'Switch into a fifth-edition SRD workflow tuned around species, backgrounds, classes, spell tiers, party sheets, treasure ledgers, travel pace, and SRD-safe field references instead of generic fantasy placeholder language.',
+        'Switch into a fifth-edition SRD setup tuned around species, backgrounds, classes, spell tiers, party sheets, treasure ledgers, travel pace, and SRD-safe field references instead of generic fantasy placeholder language.',
       primaryCta: 'Plan Tier Pacing',
-      sectionTitle: 'Dungeon Master Workspaces',
+      sectionTitle: 'DM Boards',
       sectionSubtitle:
-        'Choose a workspace tuned for CR bands, adventure sites, patrons, spell-scroll rewards, potion brewing hooks, and linked campaign prep.',
+        'Choose the board that fits CR bands, adventure sites, patrons, spell-scroll rewards, potion brewing hooks, and saved campaign prep.',
       campaign: {
         label: 'Campaign',
         title: 'Campaign Hub',
@@ -235,19 +235,19 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
         body: 'Spin patrons, dungeons, travel beats, and faction fallout that can kick off the next session fast.',
       },
       projects: {
-        label: 'Projects',
-        title: 'DM Archive',
-        body: 'Open saved 5e prep, duplicate strong site ideas, and return to half-finished adventures without losing the ruleset lock.',
+        label: 'Saved',
+        title: 'Saved Prep',
+        body: 'Open saved 5e notes, reuse strong site ideas, and jump back into half-finished adventures without losing the game lock.',
       },
       proTitle: 'Dungeon Master Pro',
       proBody: 'Your account has full access. Keep building adventures without save limits.',
     },
     modeIdentity: {
-      title: 'D&D 5e SRD mode is built around SRD v5.2.1, not a generic fantasy reskin.',
+      title: 'D&D 5e SRD is built around SRD v5.2.1, not a generic fantasy reskin.',
       body:
-        'When you switch into this mode, the app leans on 5.2.1-safe terms like species, backgrounds, weapon masteries, travel pace, spell scrolls, potions, magic items, CR bands, and dungeon-first adventure prep.',
+        'When you switch into this game, the app leans on 5.2.1-safe terms like species, backgrounds, weapon masteries, travel pace, spell scrolls, potions, magic items, CR bands, and dungeon-first adventure prep.',
       highlights: [
-        'Party mix, encounters, treasure, and adventure beats all shift toward a Dungeon Master workflow.',
+        'Party mix, encounters, treasure, and adventure beats all shift toward a Dungeon Master prep style.',
         'Treasure uses SRD-safe magic item, potion, scroll, and reagent language instead of generic loot filler.',
         'Campaign prompts stay inside open SRD rules language and avoid closed settings, logos, and branded lore.',
       ],
@@ -265,9 +265,9 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
       title: 'Campaign Hub',
       description:
         'Organize the adventuring party, tier of play, patron pressure, party roster, shared inventory, NPC web, travel and rest cadence, and linked adventures for a fifth-edition SRD campaign.',
-      selectorLabel: 'Ruleset Mode',
+      selectorLabel: 'Game',
       selectorHelper:
-        'Switch the toolkit into a fifth-edition SRD voice for tab labels, generated content, and saved project context.',
+        'Switch the app into a fifth-edition SRD voice for labels, generated content, and saved prep.',
       groupLabel: 'Adventuring Party',
       groupPlaceholder: 'The Ashen Company',
       notesPlaceholder: 'Recap, patron demands, rest pressure, travel pace, NPC reminders, spell-scroll or hoard fallout...',
@@ -277,7 +277,7 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
     xp: {
       title: 'Tier & XP Planner',
       description:
-        'Plan 5e level pacing, compare XP and milestone progression, and estimate when the party hits the big power breaks in the SRD ruleset.',
+        'Plan 5e level pacing, compare XP and milestone progression, and estimate when the party hits the big power breaks in the SRD rules.',
     },
     encounters: {
       title: 'Encounter Builder',
@@ -295,8 +295,8 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
         'Create adventure sites, patrons, twists, consequences, alternate routes, and faction pressure in a fifth-edition SRD voice.',
     },
     projects: {
-      title: 'My Projects',
-      description: 'View and manage saved prep projects for your current fifth-edition SRD workflow.',
+      title: 'Saved Prep',
+      description: 'View and manage your saved 5e encounters, treasure, adventures, and campaign notes.',
     },
   },
   pathfinder2e: {
@@ -310,7 +310,7 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
       encounters: 'Encounter',
       generator: 'Treasure',
       quest: 'Quest',
-      projects: 'Projects',
+      projects: 'Saved',
       account: 'Account',
     },
     home: {
@@ -319,12 +319,12 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
       heroSubtitle:
         'Shift the toolkit toward a more tactical, level-aware prep flow with advancement, treasure, encounter pressure, and quest planning tuned for Pathfinder-style campaigns.',
       primaryCta: 'Plan Advancement',
-      sectionTitle: 'Game Master Toolkit',
-      sectionSubtitle: 'Choose a workspace tuned for level-based prep, treasure pacing, encounter pressure, and campaign continuity.',
+      sectionTitle: 'Prep Boards',
+      sectionSubtitle: 'Choose the board that fits level-based prep, treasure pacing, encounter pressure, and campaign continuity.',
       campaign: {
         label: 'Campaign',
         title: 'Campaign Hub',
-        body: 'Track party direction, faction pressure, scenario prep, and linked planning workspaces in one place.',
+        body: 'Track party direction, faction pressure, scenario prep, and saved planning notes in one place.',
       },
       xp: {
         label: 'Advancement',
@@ -347,15 +347,15 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
         body: 'Draft clear objectives, complications, and consequences for the next scenario beat.',
       },
       projects: {
-        label: 'Projects',
-        title: 'Campaign Archive',
-        body: 'Reopen saved prep, refine existing drafts, and keep your scenario work organized.',
+        label: 'Saved',
+        title: 'Saved Prep',
+        body: 'Reopen saved prep, refine existing drafts, and keep your scenario notes organized.',
       },
       proTitle: 'Campaign Pro',
       proBody: 'Your account has full access. Keep building scenarios without save limits.',
     },
     modeIdentity: {
-      title: 'Pathfinder mode leans into level-banded scenario prep and tighter tactical language.',
+      title: 'Pathfinder leans into level-banded scenario prep and tighter tactical language.',
       body:
         'It keeps the app focused on level-aware encounter planning, scenario structure, and deliberate reward pacing instead of fifth-edition dungeon cadence.',
       highlights: [
@@ -367,10 +367,10 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
     campaign: {
       title: 'Campaign Hub',
       description:
-        'Organize party direction, campaign prep, faction pressure, and linked planning projects with a Pathfinder-style tone.',
-      selectorLabel: 'Ruleset Mode',
+        'Organize party direction, campaign prep, faction pressure, and saved planning notes with a Pathfinder-style tone.',
+      selectorLabel: 'Game',
       selectorHelper:
-        'Switch the toolkit into a Pathfinder-style voice for labels, copy, and saved project context.',
+        'Switch the app into a Pathfinder-style voice for labels, copy, and saved prep.',
       groupLabel: 'Party Name',
       groupPlaceholder: 'The Ashen Company',
       notesPlaceholder: 'Recap, unresolved hooks, next-session prep, NPC reminders, treasure follow-up...',
@@ -398,8 +398,8 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
         'Build stronger quest structure with hooks, twists, consequences, alternate resolutions, and faction pressure.',
     },
     projects: {
-      title: 'My Projects',
-      description: 'View and manage saved prep projects for your current Pathfinder-style workflow.',
+      title: 'Saved Prep',
+      description: 'View and manage your saved encounters, treasure, quests, and campaign notes.',
     },
   },
 };

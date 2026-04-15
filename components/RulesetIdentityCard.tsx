@@ -14,7 +14,7 @@ type RulesetIdentityCardProps = {
 
 export function RulesetIdentityCard({
   system,
-  label = 'Ruleset Identity',
+  label = 'About This Game',
   showIdentity = true,
   showAttribution = true,
 }: RulesetIdentityCardProps) {

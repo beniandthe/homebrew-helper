@@ -136,7 +136,7 @@ export default function ProjectsScreen() {
       total: projects.length,
       linkedCount,
       campaignCount,
-      systemBreakdown: systemBreakdown || 'No saved rulesets yet.',
+      systemBreakdown: systemBreakdown || 'No saved games yet.',
     };
   }, [projects]);
 
@@ -203,7 +203,7 @@ export default function ProjectsScreen() {
     const trimmedName = renameValue.trim();
 
     if (!trimmedName) {
-      setBanner('error', 'Invalid name', 'Project name cannot be empty.');
+      setBanner('error', 'Invalid name', 'Save name cannot be empty.');
       return;
     }
 
@@ -237,7 +237,7 @@ export default function ProjectsScreen() {
 
       setRenamingId(null);
       setRenameValue('');
-      setBanner('success', 'Project renamed', 'Your project name was updated successfully.');
+      setBanner('success', 'Save renamed', 'Your save name was updated successfully.');
     } finally {
       setDeletingId(null);
     }
@@ -248,9 +248,9 @@ export default function ProjectsScreen() {
 
     const confirmed =
       Platform.OS === 'web'
-        ? window.confirm('Delete this project? This cannot be undone.')
+        ? window.confirm('Delete this save? This cannot be undone.')
         : await new Promise<boolean>((resolve) => {
-            Alert.alert('Delete project', 'This cannot be undone.', [
+            Alert.alert('Delete save', 'This cannot be undone.', [
               { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
               { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
             ]);
@@ -273,7 +273,7 @@ export default function ProjectsScreen() {
 
       setProjects((current) => current.filter((project) => project.id !== projectId));
       await refreshAppState();
-      setBanner('success', 'Project deleted', 'The project was removed successfully.');
+      setBanner('success', 'Save deleted', 'The save was removed successfully.');
     } finally {
       setDeletingId(null);
     }
@@ -313,7 +313,7 @@ export default function ProjectsScreen() {
       ) : null}
       
       <Card>
-        <Label>Filter</Label>
+        <Label>Show</Label>
         <View style={styles.filterRow}>
           {(
             [
@@ -344,12 +344,12 @@ export default function ProjectsScreen() {
 
       {!loadingSession && userId ? (
         <Card>
-          <Label>Archive Snapshot</Label>
+          <Label>Saved At A Glance</Label>
           <View style={styles.resultRow}>
-            <BodyText>Total saved: {archiveStats.total}</BodyText>
-            <BodyText>{activeSystem.tabs.campaign} workspaces: {archiveStats.campaignCount}</BodyText>
-            <BodyText>Campaign-linked tools: {archiveStats.linkedCount}</BodyText>
-            <BodyText>Rulesets: {archiveStats.systemBreakdown}</BodyText>
+            <BodyText>Total saves: {archiveStats.total}</BodyText>
+            <BodyText>{activeSystem.tabs.campaign} saves: {archiveStats.campaignCount}</BodyText>
+            <BodyText>Tied to a campaign: {archiveStats.linkedCount}</BodyText>
+            <BodyText>Games: {archiveStats.systemBreakdown}</BodyText>
           </View>
         </Card>
       ) : null}
@@ -363,9 +363,9 @@ export default function ProjectsScreen() {
         </Card>
       ) : !userId ? (
         <Card>
-          <Label>Sign in required</Label>
+          <Label>Sign in to view saves</Label>
           <BodyText>
-            Go to the Account tab and sign in to view saved projects.
+            Go to the Account tab and sign in to view your saved prep.
           </BodyText>
         </Card>
       ) : (
@@ -403,16 +403,16 @@ export default function ProjectsScreen() {
                         return;
                       }
 
-                      showMessage('Not supported yet', 'That project type cannot be opened from the archive yet.');
+                      showMessage('Not supported yet', 'That saved entry cannot be opened from here yet.');
                     }}
                   >
                     {renamingId === item.id ? (
                       <View style={styles.renameBlock}>
-                        <Label>Rename project</Label>
+                        <Label>Rename save</Label>
                         <AppInput
                           value={renameValue}
                           onChangeText={setRenameValue}
-                          placeholder="Enter project name"
+                          placeholder="Enter save name"
                         />
                         <View style={styles.actionRow}>
                           <Pressable
@@ -449,11 +449,11 @@ export default function ProjectsScreen() {
                         <Label>{item.name}</Label>
                         <BodyText>{toolLabel}</BodyText>
                         <BodyText>{projectSummary}</BodyText>
-                        <BodyText>Ruleset: {systemLabel}</BodyText>
+                        <BodyText>Game: {systemLabel}</BodyText>
                         {linkedCampaignName ? (
                           <BodyText>Campaign: {linkedCampaignName}</BodyText>
                         ) : item.campaign_id ? (
-                          <BodyText>Campaign-linked project</BodyText>
+                          <BodyText>Tied to a campaign</BodyText>
                         ) : null}
                         <BodyText>Updated: {formatDate(item.updated_at)}</BodyText>
                       </>
@@ -466,7 +466,7 @@ export default function ProjectsScreen() {
                         onPress={() => handleStartRename(item.id, item.name)}
                         style={styles.editButton}
                       >
-                        <Label>Edit</Label>
+                        <Label>Rename</Label>
                       </Pressable>
 
                       <Pressable
@@ -489,15 +489,15 @@ export default function ProjectsScreen() {
               {loadingProjects ? (
                 <View style={styles.row}>
                   <ActivityIndicator />
-                  <BodyText>Loading projects...</BodyText>
+                  <BodyText>Loading saved prep...</BodyText>
                 </View>
               ) : (
                 <>
-                  <Label>No matching projects</Label>
+                  <Label>Nothing here yet</Label>
                   <BodyText>
                     {activeFilter === 'all'
-                      ? 'Save something from one of the toolkit screens, then come back here.'
-                      : `You do not have any ${filterLabels[activeFilter]} projects yet.`}
+                      ? 'Save something from one of your planning screens, then come back here.'
+                      : `You do not have any saved ${filterLabels[activeFilter]} entries yet.`}
                   </BodyText>
                 </>
               )}

@@ -16,6 +16,10 @@ import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanne
 import { useGameSystem } from '@/contexts/GameSystemContext';
 import { buildDndCampaignLinkContext } from '@/lib/dndCampaignLinkContext';
 import {
+  getCampaignLinkPreview,
+  NO_CAMPAIGN_OPTION_LABEL,
+} from '@/lib/campaignLinkPreview';
+import {
   syncDndEncounterLedgerEntry,
   syncDndThreatClockEntry,
   type DndEncounterLedgerEntry,
@@ -150,6 +154,7 @@ export default function EncounterScreen() {
   const effectiveSystem = useMemo(() => getGameSystem(effectiveSystemId), [effectiveSystemId]);
   const encounterConfig = useMemo(() => getEncounterSystemConfig(effectiveSystemId), [effectiveSystemId]);
   const palette = useMemo(() => getSystemPresentation(effectiveSystemId).palette, [effectiveSystemId]);
+  const campaignLinkPreview = useMemo(() => getCampaignLinkPreview('encounter', effectiveSystemId), [effectiveSystemId]);
   const dndCampaignContext = useMemo(
     () => (effectiveSystemId === 'dnd5e' ? buildDndCampaignLinkContext(selectedCampaign?.data) : null),
     [effectiveSystemId, selectedCampaign?.data]
@@ -527,7 +532,7 @@ export default function EncounterScreen() {
           setSessionFallout(projectData.sessionFallout);
         }
 
-        setLoadedProjectName(data?.name ?? 'Loaded project');
+      setLoadedProjectName(data?.name ?? 'Opened save');
         setCurrentProjectId(data?.id ?? null);
       } finally {
         setLoadingProject(false);
@@ -811,7 +816,7 @@ export default function EncounterScreen() {
     }
 
     if (!sessionUserId) {
-      setBanner('error', 'Sign in required', 'Go to the Account tab and sign in before saving a project.');
+      setBanner('error', 'Sign in required', 'Go to the Account tab and sign in before saving this plan.');
       return;
     }
 
@@ -844,7 +849,7 @@ export default function EncounterScreen() {
         setBanner(
           ledgerSync.error ? 'info' : 'success',
           ledgerSync.error ? 'Updated, campaign sync pending' : 'Updated',
-          `Your encounter project was updated successfully${campaignMessage}.${ledgerSync.synced ? ' Campaign board synced.' : ''}${ledgerSync.error ? ` Campaign sync failed: ${ledgerSync.error}` : ''}`
+          `Your encounter plan was updated successfully${campaignMessage}.${ledgerSync.synced ? ' Campaign board synced.' : ''}${ledgerSync.error ? ` Campaign sync failed: ${ledgerSync.error}` : ''}`
         );
         return;
       }
@@ -854,9 +859,10 @@ export default function EncounterScreen() {
         const latestAccess = await getLatestSaveAccess(sessionUserId);
 
         if (!latestAccess.isPro && latestAccess.count >= maxFreeSaves) {
-          setBanner('error',
+          setBanner(
+            'error',
             'Free limit reached',
-            'Free accounts can save up to 3 projects total. Upgrade to Pro for unlimited saves.'
+            'Free accounts can keep up to 3 saved plans. Upgrade to Pro for unlimited saves.'
           );
           return;
         }
@@ -887,7 +893,7 @@ export default function EncounterScreen() {
       setBanner(
         ledgerSync.error ? 'info' : 'success',
         ledgerSync.error ? 'Saved, campaign sync pending' : 'Saved',
-        `Your encounter project was saved successfully${campaignMessage}.${ledgerSync.synced ? ' Campaign board synced.' : ''}${ledgerSync.error ? ` Campaign sync failed: ${ledgerSync.error}` : ''}`
+        `Your encounter plan was saved successfully${campaignMessage}.${ledgerSync.synced ? ' Campaign board synced.' : ''}${ledgerSync.error ? ` Campaign sync failed: ${ledgerSync.error}` : ''}`
       );
     } finally {
       setSaving(false);
@@ -905,17 +911,17 @@ export default function EncounterScreen() {
     }
 
     if (!sessionUserId) {
-      setBanner('error', 'Sign in required', 'Go to the Account tab and sign in before saving to a campaign.');
+      setBanner('error', 'Sign in required', 'Go to the Account tab and sign in before adding this plan to a campaign.');
       return;
     }
 
     if (!isPro) {
-      setBanner('error', 'Pro required', 'Campaign workspaces are available on Pro.');
+      setBanner('error', 'Pro required', 'Campaign binders are available on Pro.');
       return;
     }
 
     if (!selectedCampaignId) {
-      setBanner('error', 'Select a campaign', 'Choose a campaign before adding this project.');
+      setBanner('error', 'Select a campaign', 'Choose a campaign before adding this save.');
       return;
     }
 
@@ -947,7 +953,7 @@ export default function EncounterScreen() {
         setBanner(
           ledgerSync.error ? 'info' : 'success',
           ledgerSync.error ? 'Campaign updated, sync pending' : 'Campaign updated',
-          `This project is now linked to the selected campaign.${ledgerSync.synced ? ' Campaign board synced.' : ''}${ledgerSync.error ? ` Campaign sync failed: ${ledgerSync.error}` : ''}`
+          `This save is now tied to the selected campaign.${ledgerSync.synced ? ' Campaign board synced.' : ''}${ledgerSync.error ? ` Campaign sync failed: ${ledgerSync.error}` : ''}`
         );
         return;
       }
@@ -977,7 +983,7 @@ export default function EncounterScreen() {
       setBanner(
         ledgerSync.error ? 'info' : 'success',
         ledgerSync.error ? 'Added to campaign, sync pending' : 'Added to campaign',
-        `This project was saved into the selected campaign.${ledgerSync.synced ? ' Campaign board synced.' : ''}${ledgerSync.error ? ` Campaign sync failed: ${ledgerSync.error}` : ''}`
+        `This plan was saved into the selected campaign.${ledgerSync.synced ? ' Campaign board synced.' : ''}${ledgerSync.error ? ` Campaign sync failed: ${ledgerSync.error}` : ''}`
       );
     } finally {
       setSaving(false);
@@ -1004,7 +1010,7 @@ export default function EncounterScreen() {
       >
         {loadedProjectName ? (
           <View style={styles.heroMetaRow}>
-            <Label style={styles.heroMetaLabel}>Loaded project</Label>
+            <Label style={styles.heroMetaLabel}>Opened save</Label>
             <BodyText>{loadedProjectName}</BodyText>
           </View>
         ) : null}
@@ -1030,18 +1036,18 @@ export default function EncounterScreen() {
         <SystemPanel systemId={effectiveSystemId} tone="muted">
           <View style={styles.sessionRow}>
             <ActivityIndicator />
-            <BodyText>Loading saved project...</BodyText>
+            <BodyText>Loading saved prep...</BodyText>
           </View>
         </SystemPanel>
       ) : loadedProjectName ? (
         <SystemPanel systemId={effectiveSystemId} tone="muted">
-          <Label>Loaded project</Label>
+          <Label>Opened save</Label>
           <BodyText>{loadedProjectName}</BodyText>
         </SystemPanel>
       ) : null}
 
       <SystemPanel systemId={effectiveSystemId} tone="accent">
-        <Label>Campaign Link</Label>
+        <Label>Add to Campaign</Label>
 
         {!isPro ? (
           <View style={styles.proLockedBlock}>
@@ -1059,6 +1065,14 @@ export default function EncounterScreen() {
             <Pressable onPress={handleUpgradePress} style={[styles.inlineUpgradeButton, { backgroundColor: palette.accent }]}>
               <Label style={styles.inlineUpgradeButtonText}>{campaignLinkUpsell.buttonLabel}</Label>
             </Pressable>
+
+            <Label>{campaignLinkPreview.title}</Label>
+            <BodyText style={styles.proLockedHint}>{campaignLinkPreview.body}</BodyText>
+            <View style={styles.resultRow}>
+              {campaignLinkPreview.bullets.map((entry) => (
+                <BodyText key={entry}>• {entry}</BodyText>
+              ))}
+            </View>
           </View>
         ) : loadingCampaigns ? (
           <View style={styles.sessionRow}>
@@ -1075,7 +1089,7 @@ export default function EncounterScreen() {
               style={[styles.pill, selectedCampaignId === '' && { backgroundColor: palette.accent, borderColor: palette.accent }]}
             >
               <BodyText style={selectedCampaignId === '' ? styles.pillTextSelected : undefined}>
-                none
+                {NO_CAMPAIGN_OPTION_LABEL}
               </BodyText>
             </Pressable>
 
@@ -1100,11 +1114,11 @@ export default function EncounterScreen() {
             })}
           </View>
         ) : (
-          <BodyText>No saved campaigns yet. Create one in Campaign Hub to link this project.</BodyText>
+          <BodyText>No campaigns yet. Create one in Campaign to tie this save in.</BodyText>
         )}
 
         {selectedCampaign ? (
-          <BodyText>Ruleset locked to {selectedCampaign.systemName} while linked to {selectedCampaign.name}.</BodyText>
+          <BodyText>Game locked to {selectedCampaign.systemName} while this plan is tied to {selectedCampaign.name}.</BodyText>
         ) : null}
 
         {dndCampaignContext ? (
@@ -1159,7 +1173,7 @@ export default function EncounterScreen() {
 
       {dndCampaignContext ? (
         <SystemPanel systemId={effectiveSystemId}>
-          <Label>Linked Party Readiness</Label>
+          <Label>Campaign Party Readiness</Label>
           <View style={styles.resultRow}>
             {dndCampaignContext.partySummaryLines.length > 0 ? (
               dndCampaignContext.partySummaryLines.map((entry, index) => (
@@ -1432,11 +1446,11 @@ export default function EncounterScreen() {
                   ? 'Saving...'
                   : currentProjectId
                     ? selectedCampaignId
-                      ? 'Update Linked Project'
-                      : 'Update Project'
+                      ? 'Update Campaign Save'
+                      : 'Update Save'
                     : selectedCampaignId
                       ? 'Save to Campaign'
-                      : 'Save Project'}
+                      : 'Save Plan'}
               </Label>
             </Pressable>
 
@@ -1445,7 +1459,7 @@ export default function EncounterScreen() {
               disabled={saving || loadingSession || !sessionUserId}
               style={[styles.secondaryButton, (saving || loadingSession || !sessionUserId) && styles.saveButtonDisabled]}
             >
-              <Label style={styles.secondaryButtonText}>Save As New</Label>
+              <Label style={styles.secondaryButtonText}>Save New Copy</Label>
             </Pressable>
 
             <Pressable
@@ -1459,10 +1473,10 @@ export default function EncounterScreen() {
             >
               <Label style={styles.campaignButtonText}>
                 {!isPro
-                  ? 'Link to Campaign'
+                  ? 'Add to Campaign'
                   : currentProjectId && selectedCampaignId
-                    ? 'Relink Campaign'
-                    : 'Link to Campaign'}
+                    ? 'Move to Campaign'
+                    : 'Add to Campaign'}
               </Label>
             </Pressable>
           </View>
@@ -1475,9 +1489,9 @@ export default function EncounterScreen() {
           ) : sessionUserId ? (
             <BodyText>
               {currentProjectId
-                ? 'Loaded project detected. Save respects the selected campaign automatically, or save a new copy.'
+                ? 'This is an existing save. Saving keeps it tied to the selected campaign, or you can make a fresh copy.'
                 : selectedCampaignId
-                  ? 'Signed in. Save Project will use the selected campaign by default.'
+                  ? 'Signed in. Saving will add this plan to the selected campaign by default.'
                   : 'Signed in. Saving is enabled.'}
             </BodyText>
           ) : (

@@ -188,7 +188,7 @@ export default function CampaignScreen() {
                 .order('updated_at', { ascending: false });
 
             if (error) {
-                setBanner('error', 'Linked projects failed', error.message);
+                setBanner('error', 'Saved prep failed to load', error.message);
                 return;
             }
 
@@ -363,6 +363,47 @@ export default function CampaignScreen() {
         };
     }, [campaignName, activeSystem.label, tone, levelBand, partyName, mainFaction, campaignSummary, currentObjective, sessionNotes, variationSeed, campaignConfig]);
 
+    const lockedPreview = useMemo(() => {
+        if (activeSystemId === 'dnd5e') {
+            return {
+                label: 'What this D&D campaign unlocks',
+                highlights: [
+                    'Party sheets with species, class, level, AC, HP, passive Perception, and signature gear.',
+                    'Shared inventory, treasury, attunement pressure, and named NPC tracking inside one binder.',
+                    'SRD-safe species, class, weapon, armor, item, and monster benches baked into the campaign.',
+                ],
+            };
+        }
+
+        if (activeSystemId === 'pathfinder2e') {
+            return {
+                label: 'What this PF2e campaign unlocks',
+                highlights: [
+                    'Scenario prep built around pressure, factions, tactical pacing, and saved campaign context.',
+                    'A campaign hub that keeps encounter prep, rewards, and adventure beats aligned to one game.',
+                    'A cleaner set of saved prep so the campaign keeps one authored voice throughout.',
+                ],
+            };
+        }
+
+        return {
+            label: 'What this Homebrew campaign unlocks',
+            highlights: [
+                'A flexible campaign binder for your own setting, house rules, factions, and long-form notes.',
+                'Connected prep across advancement, battle, loot, and adventure screens without published canon baggage.',
+                'One campaign binder for session prep, campaign pressure, and reusable homebrew notes.',
+            ],
+        };
+    }, [activeSystemId]);
+
+    const freeRoutePreview = useMemo(() => ([
+        { label: activeSystem.tabs.xp, path: '/xp' as const },
+        { label: activeSystem.tabs.encounters, path: '/encounters' as const },
+        { label: activeSystem.tabs.generator, path: '/generator' as const },
+        { label: activeSystem.tabs.quest, path: '/quest' as const },
+        { label: activeSystem.tabs.projects, path: '/projects' as const },
+    ]), [activeSystem.tabs.encounters, activeSystem.tabs.generator, activeSystem.tabs.projects, activeSystem.tabs.quest, activeSystem.tabs.xp]);
+
     function openLinkedProject(project: LinkedProject) {
         const pathname = getProjectRoute(project.tool_type);
 
@@ -371,7 +412,7 @@ export default function CampaignScreen() {
             return;
         }
 
-        setBanner('info', 'Not supported yet', 'That linked project type cannot be opened yet.');
+        setBanner('info', 'Not supported yet', 'That saved entry cannot be opened yet.');
     }
 
     function formatDate(dateString: string) {
@@ -394,7 +435,7 @@ export default function CampaignScreen() {
         }
 
         if (!isPro) {
-            setBanner('info', 'Pro required', 'Campaign Hub is a Pro-only workspace.');
+            setBanner('info', 'Pro required', 'Campaign Hub is part of Pro.');
             return;
         }
 
@@ -456,7 +497,7 @@ export default function CampaignScreen() {
                     setBanner(
                         'info',
                         'Free limit reached',
-                        'Free accounts can save up to 3 projects total. Upgrade to Pro for unlimited saves and campaign workspaces.'
+                        'Free accounts can keep up to 3 saved plans. Upgrade to Pro for unlimited saves and campaign binders.'
                     );
                     return;
                 }
@@ -500,9 +541,16 @@ export default function CampaignScreen() {
                     systemId={activeSystemId}
                     eyebrow={activeSystem.shortLabel}
                     title={activeSystem.campaign.title}
-                body={campaignHubUpsell.message}
-                chips={[activeSystem.label, campaignConfig.toneLabels[tone], levelBand]}
-            />
+                    body={campaignHubUpsell.message}
+                    chips={[activeSystem.label, campaignConfig.toneLabels[tone], levelBand]}
+                >
+                    <GameSystemPicker
+                        value={activeSystemId}
+                        onChange={setActiveSystemId}
+                        label={activeSystem.campaign.selectorLabel}
+                        helperText="Preview how the campaign hub changes for each game before you unlock the full binder."
+                    />
+                </SystemHero>
 
                 {statusBanner ? (
                     <StatusBanner
@@ -513,6 +561,8 @@ export default function CampaignScreen() {
                     />
                 ) : null}
 
+                <RulesetIdentityCard system={activeSystem} label="Game Preview" showAttribution={activeSystemId === 'dnd5e'} />
+
                 <UpgradeBanner
                     title={campaignHubUpsell.title}
                     message={campaignHubUpsell.message}
@@ -521,11 +571,29 @@ export default function CampaignScreen() {
                 />
 
                 <SystemPanel systemId={activeSystemId}>
-                    <Label>What Pro adds here</Label>
+                    <Label>{lockedPreview.label}</Label>
                     <View style={styles.resultRow}>
-                        <BodyText>• Campaign-level notes and objectives</BodyText>
-                        <BodyText>• Linked XP, encounter, loot, and quest projects</BodyText>
-                        <BodyText>• A central workspace for session prep</BodyText>
+                        {lockedPreview.highlights.map((entry) => (
+                            <BodyText key={entry}>• {entry}</BodyText>
+                        ))}
+                    </View>
+                </SystemPanel>
+
+                <SystemPanel systemId={activeSystemId} tone="muted">
+                    <Label>Available on Free Right Now</Label>
+                    <BodyText>
+                        You can keep exploring the current game through the free planners while Campaign Hub stays locked behind Pro.
+                    </BodyText>
+                    <View style={styles.lockedRouteRow}>
+                        {freeRoutePreview.map((entry) => (
+                            <Pressable
+                                key={entry.path}
+                                onPress={() => router.push(entry.path)}
+                                style={[styles.lockedRouteButton, { borderColor: palette.heroBorder, backgroundColor: palette.panelMuted }]}
+                            >
+                                <Label>{entry.label}</Label>
+                            </Pressable>
+                        ))}
                     </View>
                 </SystemPanel>
             </Screen>
@@ -558,7 +626,7 @@ export default function CampaignScreen() {
                 />
             ) : null}
 
-            <RulesetIdentityCard system={activeSystem} label="Ruleset Lens" showAttribution={false} />
+            <RulesetIdentityCard system={activeSystem} label="Game Notes" showAttribution={false} />
 
             {loadingProject ? (
                 <SystemPanel systemId={activeSystemId} tone="muted">
@@ -685,7 +753,7 @@ export default function CampaignScreen() {
                         <BodyText>
                             {currentProjectId
                                 ? 'Loaded campaign detected. You can update it or save a new copy.'
-                                : 'Signed in. Pro workspace is enabled.'}
+                                : 'Signed in. Campaign binder is ready.'}
                         </BodyText>
                     ) : (
                         <BodyText>Not signed in. You can plan, but not save yet.</BodyText>
@@ -722,7 +790,7 @@ export default function CampaignScreen() {
                             ))
                         ) : null}
                         {escalationWatch.npcLines.length === 0 && escalationWatch.factionLines.length === 0 ? (
-                            <BodyText>No NPC or faction pressure has been marked from linked encounters yet.</BodyText>
+                            <BodyText>No NPC or faction pressure has been marked from saved encounters yet.</BodyText>
                         ) : null}
                     </View>
                 </SystemPanel>
@@ -735,7 +803,7 @@ export default function CampaignScreen() {
                         {threatClocks.length > 0 ? (
                             threatClocks.map((entry) => (
                                 <View key={entry.id} style={styles.linkedProjectButton}>
-                                    <Label>{entry.title || entry.projectName || 'Linked threat'}</Label>
+                                    <Label>{entry.title || entry.projectName || 'Saved threat'}</Label>
                                     <BodyText>
                                         {formatThreatClockStatusLabel(entry.status)} • {entry.segmentsFilled}/{entry.segmentsTotal} • {entry.difficulty} • {entry.enemyRole}
                                     </BodyText>
@@ -749,7 +817,7 @@ export default function CampaignScreen() {
                                 </View>
                             ))
                         ) : (
-                            <BodyText>No threat clocks have been pushed in from linked encounters yet.</BodyText>
+                            <BodyText>No threat clocks have been pushed in from saved encounters yet.</BodyText>
                         )}
                     </View>
                 </SystemPanel>
@@ -762,7 +830,7 @@ export default function CampaignScreen() {
                         {encounterLedger.length > 0 ? (
                             encounterLedger.map((entry) => (
                                 <View key={entry.id} style={styles.linkedProjectButton}>
-                                    <Label>{entry.projectName || 'Linked encounter'}</Label>
+                                    <Label>{entry.projectName || 'Saved encounter'}</Label>
                                     <BodyText>
                                         {entry.difficulty} • {entry.enemyRole} • {entry.terrainType} • {entry.verdict}
                                     </BodyText>
@@ -791,7 +859,7 @@ export default function CampaignScreen() {
                         {treasureLedger.length > 0 ? (
                             treasureLedger.map((entry) => (
                                 <View key={entry.id} style={styles.linkedProjectButton}>
-                                    <Label>{entry.projectName || 'Linked treasure'}</Label>
+                                    <Label>{entry.projectName || 'Saved treasure'}</Label>
                                     <BodyText>
                                         {entry.rarity} • {entry.rewardType} • {entry.rewardTheme} • {entry.rewardSource}
                                     </BodyText>
@@ -821,7 +889,7 @@ export default function CampaignScreen() {
                         {treasuryAwards.length > 0 ? (
                             treasuryAwards.map((entry) => (
                                 <View key={entry.id} style={styles.linkedProjectButton}>
-                                    <Label>{entry.projectName || 'Linked reward'}</Label>
+                                    <Label>{entry.projectName || 'Saved reward'}</Label>
                                     <BodyText>{entry.amountGp.toLocaleString()} gp added to treasury</BodyText>
                                     {entry.note ? <BodyText>{entry.note}</BodyText> : null}
                                     <BodyText>Updated: {formatDate(entry.updatedAt)}</BodyText>
@@ -904,7 +972,7 @@ export default function CampaignScreen() {
                     loadingLinks ? (
                         <View style={styles.sessionRow}>
                             <ActivityIndicator />
-                            <BodyText>Loading linked projects...</BodyText>
+                            <BodyText>Loading saved prep...</BodyText>
                         </View>
                     ) : linkedProjects.length > 0 ? (
                         <View style={styles.resultRow}>
@@ -938,10 +1006,10 @@ export default function CampaignScreen() {
                             })}
                         </View>
                     ) : (
-                        <BodyText>No linked projects yet. Pro tool screens can attach saved projects to this campaign.</BodyText>
+                        <BodyText>No saved prep is tied to this campaign yet. Pro planning screens can attach saves here.</BodyText>
                     )
                     ) : (
-                        <BodyText>Save this campaign first, then you can start linking projects to it.</BodyText>
+                        <BodyText>Save this campaign first, then you can start attaching encounters, treasure, and adventures to it.</BodyText>
                     )}
             </SystemPanel>
         </Screen>
@@ -1042,5 +1110,17 @@ const styles = StyleSheet.create({
     },
     metaPillText: {
         color: Colors.text,
+    },
+    lockedRouteRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.sm,
+        marginTop: Spacing.sm,
+    },
+    lockedRouteButton: {
+        borderRadius: 14,
+        borderWidth: 1,
+        paddingVertical: 12,
+        paddingHorizontal: 14,
     },
 });

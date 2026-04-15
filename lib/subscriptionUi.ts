@@ -45,10 +45,10 @@ export function getPlanSummaryCopy(savedProjectCount: number, maxFreeSaves: numb
   }
 
   if (isNativePlanPreview) {
-    return `Mobile beta is currently on the free plan. You have used ${savedProjectCount}/${maxFreeSaves} saved projects.`;
+    return `Mobile beta is currently on the free plan. You have used ${savedProjectCount}/${maxFreeSaves} saved plans.`;
   }
 
-  return `Free plan active. You have used ${savedProjectCount}/${maxFreeSaves} saved projects.`;
+  return `Free plan active. You have used ${savedProjectCount}/${maxFreeSaves} saved plans.`;
 }
 
 export function getFreeLimitUpsell(maxFreeSaves: number): UpsellCopy {
@@ -62,7 +62,7 @@ export function getFreeLimitUpsell(maxFreeSaves: number): UpsellCopy {
 
   return {
     title: 'Free plan limit reached',
-    message: `You have used all ${maxFreeSaves} free saves. Upgrade to Pro to create additional projects.`,
+    message: `You have used all ${maxFreeSaves} free saves. Upgrade to Pro to create more saved plans.`,
     buttonLabel: 'Upgrade to Pro',
   };
 }
@@ -78,7 +78,7 @@ export function getCampaignHubUpsell(): UpsellCopy {
 
   return {
     title: 'Campaign Hub is Pro-only',
-    message: 'Upgrade to Pro to build campaign workspaces, link saved tool projects, and manage prep in one place.',
+    message: 'Upgrade to Pro to build campaign binders, connect saved plans, and manage prep in one place.',
     buttonLabel: 'Upgrade to Pro',
   };
 }
@@ -90,16 +90,16 @@ export function getCampaignLinkUpsell(toolName: string): CampaignLinkUpsellCopy 
       message: 'Campaign linking will arrive with native Pro subscriptions.',
       buttonLabel: 'View Plans',
       lockedTitle: 'Coming soon on mobile',
-      lockedMessage: `${toolName} can be linked into Campaign Hub once native Pro subscriptions are added.`,
+      lockedMessage: `${toolName} can join Campaign Hub once native Pro subscriptions are added.`,
     };
   }
 
   return {
     title: 'Get Pro',
-    message: 'Upgrade to Pro to organize XP, encounters, loot, and quests inside a shared campaign workspace.',
+    message: 'Upgrade to Pro to organize XP, encounters, loot, and adventures inside one campaign binder.',
     buttonLabel: 'Get Pro',
     lockedTitle: 'Pro only',
-    lockedMessage: `${toolName} can be linked into a Campaign Hub workspace on Pro.`,
+    lockedMessage: `${toolName} can be added to a Campaign Hub binder on Pro.`,
   };
 }
 
@@ -108,7 +108,7 @@ export function getHomeUpgradeCopy(maxFreeSaves: number): HomeUpgradeCopy {
     return {
       label: 'Mobile beta',
       title: 'Core tools are live on mobile.',
-      text: `Use the free toolkit and up to ${maxFreeSaves} saved projects on your phone today. Native Pro subscriptions and Campaign Hub are coming in a later mobile release.`,
+      text: `Use the free app and up to ${maxFreeSaves} saved plans on your phone today. Native Pro subscriptions and Campaign Hub are coming in a later mobile release.`,
       buttonLabel: 'View Plans',
     };
   }
@@ -116,7 +116,7 @@ export function getHomeUpgradeCopy(maxFreeSaves: number): HomeUpgradeCopy {
   return {
     label: 'Upgrade to Pro',
     title: 'Unlock the full guild.',
-    text: `Remove the ${maxFreeSaves}-project limit and keep unlimited campaigns, encounters, treasure sets, and quest concepts.`,
+    text: `Remove the ${maxFreeSaves}-save limit and keep unlimited campaigns, encounters, treasure sets, and adventure ideas.`,
     buttonLabel: 'View Plans',
   };
 }
@@ -129,7 +129,7 @@ export function getLandingPricingCopy(maxFreeSaves: number): LandingPricingCopy 
       proLabel: 'Pro - coming soon on mobile',
       proDescription: 'Native subscriptions are not available in this build yet.',
       proBullets: [
-        `Core tools and ${maxFreeSaves} saved projects are live today`,
+        `Core planners and ${maxFreeSaves} saved plans are live today`,
         'Campaign Hub unlocks with future mobile Pro',
         'Native subscription management is planned for a later release',
       ],
@@ -144,9 +144,9 @@ export function getLandingPricingCopy(maxFreeSaves: number): LandingPricingCopy 
     proLabel: 'Pro - $4.99/month',
     proDescription: 'For active GMs and long-running campaigns.',
     proBullets: [
-      'Unlimited saved projects',
+      'Unlimited saved plans',
       'Campaign Hub access',
-      'Linked planning workflows',
+      'Campaign linking',
       'Manage billing anytime',
     ],
     footer: 'Cancel anytime.',

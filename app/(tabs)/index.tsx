@@ -49,8 +49,8 @@ export default function HomeScreen() {
           <GameSystemPicker
             value={activeSystemId}
             onChange={setActiveSystemId}
-            label="Toolkit Mode"
-            helperText="Choose the game frame first, then build prep that sounds and feels authored for that table."
+            label="Game Style"
+            helperText="Pick the game first, then build prep that sounds right for that table."
           />
 
           <View style={styles.heroActions}>
@@ -68,7 +68,7 @@ export default function HomeScreen() {
               ]}
               onPress={() => goTo('/projects')}
             >
-              <Label>Open My Projects</Label>
+              <Label>Open Saved Prep</Label>
             </Pressable>
           </View>
         </SystemHero>

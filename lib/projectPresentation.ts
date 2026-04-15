@@ -134,7 +134,7 @@ export function getProjectSummary(toolType: string, data: ProjectData) {
       return clipText(segments.join(' - '));
     }
 
-    return clipText(objective ?? summary ?? notes ?? 'Campaign planning workspace.');
+    return clipText(objective ?? summary ?? notes ?? 'Campaign notes and prep.');
   }
 
   if (toolType === 'xp_calculator') {
@@ -193,5 +193,5 @@ export function getProjectSummary(toolType: string, data: ProjectData) {
     return segments.length > 0 ? segments.join(' • ') : 'Quest structure, twists, and consequences.';
   }
 
-  return clipText(notes ?? summary ?? 'Saved project.');
+  return clipText(notes ?? summary ?? 'Saved prep.');
 }
