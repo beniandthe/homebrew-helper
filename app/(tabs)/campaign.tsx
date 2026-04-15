@@ -4,20 +4,81 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useAppState } from '@/contexts/AppStateContext';
 import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
-import { BodyText, Heading, Label } from '@/components/AppText';
-import { Card } from '@/components/Card';
+import { BodyText, Label } from '@/components/AppText';
+import { DndCampaignWorkbench } from '@/components/DndCampaignWorkbench';
+import { GameSystemPicker } from '@/components/GameSystemPicker';
+import { RulesetIdentityCard } from '@/components/RulesetIdentityCard';
 import { Screen } from '@/components/Screen';
+import { SystemHero } from '@/components/SystemHero';
+import { SystemPanel } from '@/components/SystemPanel';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { getCampaignSystemConfig, type CampaignTone } from '@/lib/campaignSystemConfig';
+import {
+    buildDndCampaignWorkbenchSnapshot,
+    createDndPartyTreasury,
+    readDndInventoryItems,
+    readDndNpcRoster,
+    readDndPartyMembers,
+    readDndPartyTreasury,
+    type DndInventoryItem,
+    type DndNpc,
+    type DndPartyMember,
+    type DndPartyTreasury,
+} from '@/lib/dnd5eCampaignKit';
+import {
+    readDndEncounterLedger,
+    readDndThreatClocks,
+    readDndTreasureLedger,
+    readDndTreasuryAwards,
+    type DndEncounterLedgerEntry,
+    type DndThreatClockEntry,
+    type DndTreasureLedgerEntry,
+    type DndTreasuryAwardEntry,
+} from '@/lib/dndCampaignLedger';
 import { buildSeed, pickManyFromPool } from '@/lib/generation';
+import { useGameSystem } from '@/contexts/GameSystemContext';
 import { fetchLatestSaveAccess } from '@/lib/projectAccess';
+import { getSystemPresentation } from '@/lib/systemPresentation';
+import {
+    getProjectRoute,
+    getProjectSummary,
+    getProjectSystemId,
+    getProjectSystemShortLabel,
+    getProjectToolBadge,
+    getProjectToolLabel,
+    type ProjectData,
+} from '@/lib/projectPresentation';
+import { resolveGameSystemId, type GameSystemId } from '@/lib/gameSystems';
 import { getCampaignHubUpsell } from '@/lib/subscriptionUi';
 
-type CampaignTone = 'heroic' | 'grim' | 'mystic' | 'political' | 'sandbox';
+const CAMPAIGN_TONE_OPTIONS: CampaignTone[] = ['heroic', 'grim', 'mystic', 'political', 'sandbox'];
+
+function isCampaignTone(value: unknown): value is CampaignTone {
+    return typeof value === 'string' && CAMPAIGN_TONE_OPTIONS.includes(value as CampaignTone);
+}
+
+function formatThreatClockStatusLabel(value: string) {
+    switch (value) {
+        case 'lurking':
+            return 'Lurking';
+        case 'active':
+            return 'Active';
+        case 'escalating':
+            return 'Escalating';
+        case 'contained':
+            return 'Contained';
+        case 'resolved':
+            return 'Resolved';
+        default:
+            return value;
+    }
+}
 
 type CampaignProjectData = {
     campaignName?: string;
+    systemId?: GameSystemId;
     systemName?: string;
     tone?: CampaignTone;
     levelBand?: string;
@@ -26,6 +87,15 @@ type CampaignProjectData = {
     campaignSummary?: string;
     currentObjective?: string;
     sessionNotes?: string;
+    variationSeed?: number;
+    partyRoster?: DndPartyMember[];
+    sharedInventory?: DndInventoryItem[];
+    partyTreasury?: DndPartyTreasury;
+    npcRoster?: DndNpc[];
+    encounterLedger?: DndEncounterLedgerEntry[];
+    treasureLedger?: DndTreasureLedgerEntry[];
+    threatClocks?: DndThreatClockEntry[];
+    treasuryAwards?: DndTreasuryAwardEntry[];
 };
 
 type LinkedProject = {
@@ -33,21 +103,32 @@ type LinkedProject = {
     name: string;
     tool_type: string;
     updated_at: string;
+    data?: ProjectData;
 };
 
 export default function CampaignScreen() {
     const params = useLocalSearchParams<{ projectId?: string }>();
+    const { activeSystem, activeSystemId, setActiveSystemId } = useGameSystem();
+    const campaignConfig = useMemo(() => getCampaignSystemConfig(activeSystemId), [activeSystemId]);
+    const palette = useMemo(() => getSystemPresentation(activeSystemId).palette, [activeSystemId]);
 
-    const [campaignName, setCampaignName] = useState('Eryndor Campaign');
-    const [systemName, setSystemName] = useState('D&D 5e');
-    const [tone, setTone] = useState<CampaignTone>('heroic');
-    const [levelBand, setLevelBand] = useState('Levels 1-5');
-    const [partyName, setPartyName] = useState('The Ashen Company');
-    const [mainFaction, setMainFaction] = useState('Crimson Pact');
+    const [campaignName, setCampaignName] = useState(campaignConfig.defaults.campaignName);
+    const [tone, setTone] = useState<CampaignTone>(campaignConfig.defaults.tone);
+    const [levelBand, setLevelBand] = useState(campaignConfig.defaults.levelBand);
+    const [partyName, setPartyName] = useState(campaignConfig.defaults.partyName);
+    const [mainFaction, setMainFaction] = useState(campaignConfig.defaults.mainFaction);
     const [campaignSummary, setCampaignSummary] = useState('');
     const [currentObjective, setCurrentObjective] = useState('');
     const [sessionNotes, setSessionNotes] = useState('');
     const [variationSeed, setVariationSeed] = useState(0);
+    const [partyRoster, setPartyRoster] = useState<DndPartyMember[]>([]);
+    const [sharedInventory, setSharedInventory] = useState<DndInventoryItem[]>([]);
+    const [partyTreasury, setPartyTreasury] = useState<DndPartyTreasury>(createDndPartyTreasury());
+    const [npcRoster, setNpcRoster] = useState<DndNpc[]>([]);
+    const [encounterLedger, setEncounterLedger] = useState<DndEncounterLedgerEntry[]>([]);
+    const [treasureLedger, setTreasureLedger] = useState<DndTreasureLedgerEntry[]>([]);
+    const [threatClocks, setThreatClocks] = useState<DndThreatClockEntry[]>([]);
+    const [treasuryAwards, setTreasuryAwards] = useState<DndTreasuryAwardEntry[]>([]);
 
     const [loadingProject, setLoadingProject] = useState(false);
     const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
@@ -101,7 +182,7 @@ export default function CampaignScreen() {
 
             const { data, error } = await supabase
                 .from('saved_projects')
-                .select('id, name, tool_type, updated_at')
+                .select('id, name, tool_type, updated_at, data')
                 .eq('user_id', sessionUserId)
                 .eq('campaign_id', campaignId)
                 .order('updated_at', { ascending: false });
@@ -116,6 +197,30 @@ export default function CampaignScreen() {
             setLoadingLinks(false);
         }
     }, [sessionUserId]);
+
+    useEffect(() => {
+        if (params.projectId || currentProjectId) {
+            return;
+        }
+
+        setCampaignName(campaignConfig.defaults.campaignName);
+        setTone(campaignConfig.defaults.tone);
+        setLevelBand(campaignConfig.defaults.levelBand);
+        setPartyName(campaignConfig.defaults.partyName);
+        setMainFaction(campaignConfig.defaults.mainFaction);
+        setCampaignSummary('');
+        setCurrentObjective('');
+        setSessionNotes('');
+        setVariationSeed(0);
+        setPartyRoster([]);
+        setSharedInventory([]);
+        setPartyTreasury(createDndPartyTreasury());
+        setNpcRoster([]);
+        setEncounterLedger([]);
+        setTreasureLedger([]);
+        setThreatClocks([]);
+        setTreasuryAwards([]);
+    }, [campaignConfig, params.projectId, currentProjectId]);
 
     useEffect(() => {
         async function loadProject() {
@@ -149,15 +254,12 @@ export default function CampaignScreen() {
                 const projectData = (data?.data ?? {}) as CampaignProjectData;
 
                 if (typeof projectData.campaignName === 'string') setCampaignName(projectData.campaignName);
-                if (typeof projectData.systemName === 'string') setSystemName(projectData.systemName);
 
-                if (
-                    projectData.tone === 'heroic' ||
-                    projectData.tone === 'grim' ||
-                    projectData.tone === 'mystic' ||
-                    projectData.tone === 'political' ||
-                    projectData.tone === 'sandbox'
-                ) {
+                if (projectData.systemId || projectData.systemName) {
+                    setActiveSystemId(resolveGameSystemId(projectData.systemId ?? projectData.systemName));
+                }
+
+                if (isCampaignTone(projectData.tone)) {
                     setTone(projectData.tone);
                 }
 
@@ -167,6 +269,15 @@ export default function CampaignScreen() {
                 if (typeof projectData.campaignSummary === 'string') setCampaignSummary(projectData.campaignSummary);
                 if (typeof projectData.currentObjective === 'string') setCurrentObjective(projectData.currentObjective);
                 if (typeof projectData.sessionNotes === 'string') setSessionNotes(projectData.sessionNotes);
+                if (typeof projectData.variationSeed === 'number') setVariationSeed(projectData.variationSeed);
+                setPartyRoster(readDndPartyMembers(projectData.partyRoster));
+                setSharedInventory(readDndInventoryItems(projectData.sharedInventory));
+                setPartyTreasury(readDndPartyTreasury(projectData.partyTreasury));
+                setNpcRoster(readDndNpcRoster(projectData.npcRoster));
+                setEncounterLedger(readDndEncounterLedger(projectData.encounterLedger));
+                setTreasureLedger(readDndTreasureLedger(projectData.treasureLedger));
+                setThreatClocks(readDndThreatClocks(projectData.threatClocks));
+                setTreasuryAwards(readDndTreasuryAwards(projectData.treasuryAwards));
 
                 setLoadedProjectName(data?.name ?? 'Loaded campaign');
                 setCurrentProjectId(data?.id ?? null);
@@ -180,78 +291,95 @@ export default function CampaignScreen() {
         }
 
         loadProject();
-    }, [params.projectId, sessionUserId, isPro, loadLinkedProjects]);
+    }, [params.projectId, sessionUserId, isPro, loadLinkedProjects, setActiveSystemId]);
+
+    const dndWorkbenchSnapshot = useMemo(() => {
+        if (activeSystemId !== 'dnd5e') {
+            return null;
+        }
+
+        return buildDndCampaignWorkbenchSnapshot({
+            partyRoster,
+            inventory: sharedInventory,
+            treasury: partyTreasury,
+            npcRoster,
+        });
+    }, [activeSystemId, npcRoster, partyRoster, partyTreasury, sharedInventory]);
+    const escalationWatch = useMemo(() => {
+        const activeThreats = threatClocks.filter((entry) => entry.status !== 'resolved');
+
+        return {
+            npcLines: activeThreats
+                .filter((entry) => entry.linkedNpcName)
+                .map((entry) => `${entry.linkedNpcName} • ${entry.escalationTag || formatThreatClockStatusLabel(entry.status)} • ${entry.title}`),
+            factionLines: activeThreats
+                .filter((entry) => entry.linkedFaction)
+                .map((entry) => `${entry.linkedFaction} • ${entry.escalationTag || formatThreatClockStatusLabel(entry.status)} • ${entry.title}`),
+        };
+    }, [threatClocks]);
+
+    const heroChips = useMemo(() => {
+        if (activeSystemId === 'dnd5e' && dndWorkbenchSnapshot) {
+            return [
+                campaignConfig.toneLabels[tone],
+                levelBand || campaignConfig.defaults.levelBand,
+                `${dndWorkbenchSnapshot.partyCount} party sheets`,
+                `${dndWorkbenchSnapshot.inventoryCount} tracked items`,
+                `${dndWorkbenchSnapshot.npcCount} NPCs`,
+                `${threatClocks.filter((entry) => entry.status !== 'resolved').length} live threats`,
+            ];
+        }
+
+        return [
+            campaignConfig.toneLabels[tone],
+            levelBand || campaignConfig.defaults.levelBand,
+            partyName || 'Unnamed party',
+            mainFaction || 'No patron set',
+        ];
+    }, [activeSystemId, campaignConfig.defaults.levelBand, campaignConfig.toneLabels, dndWorkbenchSnapshot, levelBand, mainFaction, partyName, threatClocks, tone]);
 
     const campaignSnapshot = useMemo(() => {
         const summary = campaignSummary.trim() || 'No campaign summary written yet.';
         const objective = currentObjective.trim() || 'No current objective set.';
         const notesState =
             sessionNotes.trim().length > 0
-                ? 'Session notes are active and ready for ongoing prep.'
-                : 'No session notes yet. Add recap points, hooks, or unresolved threads.';
+                ? campaignConfig.notesState.active
+                : campaignConfig.notesState.empty;
 
         const seed = buildSeed(
-            `${campaignName}|${systemName}|${tone}|${levelBand}|${partyName}|${mainFaction}|${campaignSummary}|${currentObjective}|${sessionNotes}|${variationSeed}`
+            `${campaignName}|${activeSystem.label}|${tone}|${levelBand}|${partyName}|${mainFaction}|${campaignSummary}|${currentObjective}|${sessionNotes}|${variationSeed}`
         );
 
         return {
             summary,
             objective,
             notesState,
-            toneSummary: `${tone} tone • ${levelBand} • ${systemName}`,
-            campaignPulse:
-                tone === 'heroic'
-                    ? 'Escalate hope vs. danger each session with visible stakes and recoverable losses.'
-                    : tone === 'grim'
-                        ? 'Keep trade-offs costly and let victories carry visible scars.'
-                        : tone === 'mystic'
-                            ? 'Reveal layered truths gradually and make mysteries alter player assumptions.'
-                            : tone === 'political'
-                                ? 'Track factions as active agents; every move should shift leverage.'
-                                : 'Offer multiple hooks in parallel so players choose direction and pacing.',
-            prepAngles: pickManyFromPool(
-                [
-                    'Create a faction clock with 3 visible stages and one hidden tipping point.',
-                    'Write one consequence that lands if the party ignores the current objective.',
-                    'Add a non-combat obstacle that still advances the main faction storyline.',
-                    'Prepare one ally scene and one rival scene to react to the same decision.',
-                    'Reveal a clue that reframes an earlier session without invalidating it.',
-                    'Introduce a resource pressure (time, supplies, influence) to reinforce stakes.',
-                    'Define one rumor that is true, one that is false, and one that is partially true.',
-                    'Prepare two fallback routes if the party skips the expected objective.',
-                    'Map one location that can host both diplomacy and combat resolutions.',
-                    'Tie one loot reward directly to a future quest or faction negotiation.',
-                    'Advance a background threat by one step if players take a long rest.',
-                    'Prewrite one NPC reaction line for success, failure, and moral compromise.',
-                ],
-                2,
-                seed + 7
-            ),
+            toneSummary: `${campaignConfig.toneLabels[tone]} • ${levelBand} • ${activeSystem.label}`,
+            campaignPulse: campaignConfig.campaignPulse[tone],
+            prepAngles: pickManyFromPool(campaignConfig.prepAnglePool, 2, seed + 7),
+            sessionLens: pickManyFromPool(campaignConfig.sessionLensPool[tone], 2, seed + 17),
+            factionMoves: pickManyFromPool(campaignConfig.factionMovePool, 2, seed + 29),
+            stakes: pickManyFromPool(campaignConfig.stakePool, 2, seed + 41),
         };
-    }, [campaignName, systemName, tone, levelBand, partyName, mainFaction, campaignSummary, currentObjective, sessionNotes, variationSeed]);
+    }, [campaignName, activeSystem.label, tone, levelBand, partyName, mainFaction, campaignSummary, currentObjective, sessionNotes, variationSeed, campaignConfig]);
 
     function openLinkedProject(project: LinkedProject) {
-        if (project.tool_type === 'xp_calculator') {
-            router.push({ pathname: '/xp', params: { projectId: project.id } });
-            return;
-        }
+        const pathname = getProjectRoute(project.tool_type);
 
-        if (project.tool_type === 'encounter_calculator') {
-            router.push({ pathname: '/encounters', params: { projectId: project.id } });
-            return;
-        }
-
-        if (project.tool_type === 'loot_generator') {
-            router.push({ pathname: '/generator', params: { projectId: project.id } });
-            return;
-        }
-
-        if (project.tool_type === 'quest_generator') {
-            router.push({ pathname: '/quest', params: { projectId: project.id } });
+        if (pathname) {
+            router.push({ pathname, params: { projectId: project.id } });
             return;
         }
 
         setBanner('info', 'Not supported yet', 'That linked project type cannot be opened yet.');
+    }
+
+    function formatDate(dateString: string) {
+        try {
+            return new Date(dateString).toLocaleString();
+        } catch {
+            return dateString;
+        }
     }
 
     async function handleSaveProject(asNew = false) {
@@ -275,7 +403,8 @@ export default function CampaignScreen() {
 
             const payload = {
                 campaignName,
-                systemName,
+                systemId: activeSystemId,
+                systemName: activeSystem.label,
                 tone,
                 levelBand,
                 partyName,
@@ -284,6 +413,14 @@ export default function CampaignScreen() {
                 currentObjective,
                 sessionNotes,
                 variationSeed,
+                partyRoster,
+                sharedInventory,
+                partyTreasury,
+                npcRoster,
+                encounterLedger,
+                treasureLedger,
+                threatClocks,
+                treasuryAwards,
             };
 
             const timestampName = campaignName.trim() || `Campaign - ${new Date().toLocaleString()}`;
@@ -359,12 +496,13 @@ export default function CampaignScreen() {
     if (!loadingSession && !isPro) {
         return (
             <Screen>
-                <Card>
-                    <Heading>Campaign Hub</Heading>
-                    <BodyText>
-                        {campaignHubUpsell.message}
-                    </BodyText>
-                </Card>
+                <SystemHero
+                    systemId={activeSystemId}
+                    eyebrow={activeSystem.shortLabel}
+                    title={activeSystem.campaign.title}
+                body={campaignHubUpsell.message}
+                chips={[activeSystem.label, campaignConfig.toneLabels[tone], levelBand]}
+            />
 
                 {statusBanner ? (
                     <StatusBanner
@@ -382,26 +520,34 @@ export default function CampaignScreen() {
                     onPress={handleUpgradePress}
                 />
 
-                <Card>
+                <SystemPanel systemId={activeSystemId}>
                     <Label>What Pro adds here</Label>
                     <View style={styles.resultRow}>
                         <BodyText>• Campaign-level notes and objectives</BodyText>
                         <BodyText>• Linked XP, encounter, loot, and quest projects</BodyText>
                         <BodyText>• A central workspace for session prep</BodyText>
                     </View>
-                </Card>
+                </SystemPanel>
             </Screen>
         );
     }
 
     return (
         <Screen>
-            <Card>
-                <Heading>Campaign Hub</Heading>
-                <BodyText>
-                    Organize your campaign identity, party focus, faction pressure, session prep, and linked toolkit projects.
-                </BodyText>
-            </Card>
+            <SystemHero
+                systemId={activeSystemId}
+                eyebrow={activeSystem.shortLabel}
+                title={activeSystem.campaign.title}
+                body={activeSystem.campaign.description}
+                chips={heroChips}
+            >
+                {loadedProjectName ? (
+                    <View style={styles.heroMetaRow}>
+                        <Label style={styles.heroMetaLabel}>Loaded campaign</Label>
+                        <BodyText>{loadedProjectName}</BodyText>
+                    </View>
+                ) : null}
+            </SystemHero>
 
             {statusBanner ? (
                 <StatusBanner
@@ -412,77 +558,97 @@ export default function CampaignScreen() {
                 />
             ) : null}
 
+            <RulesetIdentityCard system={activeSystem} label="Ruleset Lens" showAttribution={false} />
+
             {loadingProject ? (
-                <Card>
+                <SystemPanel systemId={activeSystemId} tone="muted">
                     <View style={styles.sessionRow}>
                         <ActivityIndicator />
                         <BodyText>Loading saved campaign...</BodyText>
                     </View>
-                </Card>
+                </SystemPanel>
             ) : loadedProjectName ? (
-                <Card>
+                <SystemPanel systemId={activeSystemId} tone="muted">
                     <Label>Loaded campaign</Label>
                     <BodyText>{loadedProjectName}</BodyText>
-                </Card>
+                </SystemPanel>
             ) : null}
 
-            <Card>
-                <Label>Campaign Name</Label>
-                <AppInput value={campaignName} onChangeText={setCampaignName} placeholder="Eryndor Campaign" />
+            <SystemPanel systemId={activeSystemId} tone="accent">
+                <GameSystemPicker
+                    value={activeSystemId}
+                    onChange={setActiveSystemId}
+                    label={activeSystem.campaign.selectorLabel}
+                    helperText={activeSystem.campaign.selectorHelper}
+                />
 
-                <Label>System / Ruleset</Label>
-                <AppInput value={systemName} onChangeText={setSystemName} placeholder="D&D 5e" />
+                <Label>{campaignConfig.labels.campaignName}</Label>
+                <AppInput
+                    value={campaignName}
+                    onChangeText={setCampaignName}
+                    placeholder={campaignConfig.defaults.campaignName}
+                />
 
-                <Label>Tone</Label>
+                <Label>{campaignConfig.labels.tone}</Label>
                 <View style={styles.pillRow}>
-                    {(['heroic', 'grim', 'mystic', 'political', 'sandbox'] as CampaignTone[]).map((option) => {
+                    {CAMPAIGN_TONE_OPTIONS.map((option) => {
                         const selected = tone === option;
                         return (
                             <Pressable
                                 key={option}
                                 onPress={() => setTone(option)}
-                                style={[styles.pill, selected && styles.pillSelected]}
+                                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
                             >
-                                <BodyText style={selected ? styles.pillTextSelected : undefined}>{option}</BodyText>
+                                <BodyText style={selected ? styles.pillTextSelected : undefined}>
+                                    {campaignConfig.toneLabels[option]}
+                                </BodyText>
                             </Pressable>
                         );
                     })}
                 </View>
 
-                <Label>Level Band</Label>
-                <AppInput value={levelBand} onChangeText={setLevelBand} placeholder="Levels 1-5" />
+                <Label>{campaignConfig.labels.levelBand}</Label>
+                <AppInput value={levelBand} onChangeText={setLevelBand} placeholder={campaignConfig.defaults.levelBand} />
 
-                <Label>Party Name / Group</Label>
-                <AppInput value={partyName} onChangeText={setPartyName} placeholder="The Ashen Company" />
+                <Label>{activeSystem.campaign.groupLabel}</Label>
+                <AppInput
+                    value={partyName}
+                    onChangeText={setPartyName}
+                    placeholder={activeSystem.campaign.groupPlaceholder}
+                />
 
-                <Label>Main Faction</Label>
-                <AppInput value={mainFaction} onChangeText={setMainFaction} placeholder="Crimson Pact" />
+                <Label>{campaignConfig.labels.mainFaction}</Label>
+                <AppInput
+                    value={mainFaction}
+                    onChangeText={setMainFaction}
+                    placeholder={campaignConfig.defaults.mainFaction}
+                />
 
-                <Label>Campaign Summary</Label>
+                <Label>{campaignConfig.labels.summary}</Label>
                 <AppInput
                     value={campaignSummary}
                     onChangeText={setCampaignSummary}
-                    placeholder="What is this campaign about, at a high level?"
+                    placeholder={activeSystem.campaign.summaryPlaceholder}
                     multiline
                 />
 
-                <Label>Current Objective</Label>
+                <Label>{campaignConfig.labels.objective}</Label>
                 <AppInput
                     value={currentObjective}
                     onChangeText={setCurrentObjective}
-                    placeholder="What is the party trying to accomplish right now?"
+                    placeholder={activeSystem.campaign.objectivePlaceholder}
                     multiline
                 />
 
-                <Label>Session Notes</Label>
+                <Label>{campaignConfig.labels.notes}</Label>
                 <AppInput
                     value={sessionNotes}
                     onChangeText={setSessionNotes}
-                    placeholder="Recap, unresolved hooks, next-scene prep, NPC reminders..."
+                    placeholder={activeSystem.campaign.notesPlaceholder}
                     multiline
                 />
                 <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
-                    <Label style={styles.secondaryButtonText}>Reroll Prep Angles</Label>
+                    <Label style={styles.secondaryButtonText}>{campaignConfig.labels.rerollButton}</Label>
                 </Pressable>
 
                 <View style={styles.saveRow}>
@@ -490,7 +656,11 @@ export default function CampaignScreen() {
                         <Pressable
                             onPress={() => handleSaveProject(false)}
                             disabled={saving || loadingSession}
-                            style={[styles.saveButton, (saving || loadingSession) && styles.saveButtonDisabled]}
+                            style={[
+                                styles.saveButton,
+                                { backgroundColor: palette.accent },
+                                (saving || loadingSession) && styles.saveButtonDisabled,
+                            ]}
                         >
                             <Label style={styles.saveButtonText}>
                                 {saving ? 'Saving...' : currentProjectId ? 'Update Campaign' : 'Save Campaign'}
@@ -521,44 +691,215 @@ export default function CampaignScreen() {
                         <BodyText>Not signed in. You can plan, but not save yet.</BodyText>
                     )}
                 </View>
-            </Card>
+            </SystemPanel>
 
-            <Card>
-                <Label>Campaign Snapshot</Label>
+            {activeSystemId === 'dnd5e' ? (
+                <DndCampaignWorkbench
+                    partyRoster={partyRoster}
+                    setPartyRoster={setPartyRoster}
+                    sharedInventory={sharedInventory}
+                    setSharedInventory={setSharedInventory}
+                    partyTreasury={partyTreasury}
+                    setPartyTreasury={setPartyTreasury}
+                    npcRoster={npcRoster}
+                    setNpcRoster={setNpcRoster}
+                    threatClocks={threatClocks}
+                />
+            ) : null}
+
+            {activeSystemId === 'dnd5e' ? (
+                <SystemPanel systemId={activeSystemId}>
+                    <Label>Escalation Watch</Label>
+                    <View style={styles.resultRow}>
+                        {escalationWatch.npcLines.length > 0 ? (
+                            escalationWatch.npcLines.map((entry, index) => (
+                                <BodyText key={`${entry}-${index}`}>• NPC pressure: {entry}</BodyText>
+                            ))
+                        ) : null}
+                        {escalationWatch.factionLines.length > 0 ? (
+                            escalationWatch.factionLines.map((entry, index) => (
+                                <BodyText key={`${entry}-${index}`}>• Faction pressure: {entry}</BodyText>
+                            ))
+                        ) : null}
+                        {escalationWatch.npcLines.length === 0 && escalationWatch.factionLines.length === 0 ? (
+                            <BodyText>No NPC or faction pressure has been marked from linked encounters yet.</BodyText>
+                        ) : null}
+                    </View>
+                </SystemPanel>
+            ) : null}
+
+            {activeSystemId === 'dnd5e' ? (
+                <SystemPanel systemId={activeSystemId}>
+                    <Label>Active Threat Clocks</Label>
+                    <View style={styles.resultRow}>
+                        {threatClocks.length > 0 ? (
+                            threatClocks.map((entry) => (
+                                <View key={entry.id} style={styles.linkedProjectButton}>
+                                    <Label>{entry.title || entry.projectName || 'Linked threat'}</Label>
+                                    <BodyText>
+                                        {formatThreatClockStatusLabel(entry.status)} • {entry.segmentsFilled}/{entry.segmentsTotal} • {entry.difficulty} • {entry.enemyRole}
+                                    </BodyText>
+                                    {entry.linkedNpcName ? <BodyText>NPC: {entry.linkedNpcName}</BodyText> : null}
+                                    {entry.linkedFaction ? <BodyText>Faction: {entry.linkedFaction}</BodyText> : null}
+                                    {entry.escalationTag ? <BodyText>Pressure: {entry.escalationTag}</BodyText> : null}
+                                    <BodyText>{entry.verdict}</BodyText>
+                                    {entry.latestBeat ? <BodyText>Latest beat: {entry.latestBeat}</BodyText> : null}
+                                    {entry.fallout ? <BodyText>Fallout: {entry.fallout}</BodyText> : null}
+                                    <BodyText>Updated: {formatDate(entry.updatedAt)}</BodyText>
+                                </View>
+                            ))
+                        ) : (
+                            <BodyText>No threat clocks have been pushed in from linked encounters yet.</BodyText>
+                        )}
+                    </View>
+                </SystemPanel>
+            ) : null}
+
+            {activeSystemId === 'dnd5e' ? (
+                <SystemPanel systemId={activeSystemId}>
+                    <Label>Recent Encounter Ledger</Label>
+                    <View style={styles.resultRow}>
+                        {encounterLedger.length > 0 ? (
+                            encounterLedger.map((entry) => (
+                                <View key={entry.id} style={styles.linkedProjectButton}>
+                                    <Label>{entry.projectName || 'Linked encounter'}</Label>
+                                    <BodyText>
+                                        {entry.difficulty} • {entry.enemyRole} • {entry.terrainType} • {entry.verdict}
+                                    </BodyText>
+                                    <BodyText>
+                                        Party level {entry.partyLevel}, party size {entry.partySize}
+                                    </BodyText>
+                                    {entry.monsterBench.length > 0 ? (
+                                        <BodyText>Monster bench: {entry.monsterBench.join(', ')}</BodyText>
+                                    ) : null}
+                                    {entry.lineupIdeas[0] ? <BodyText>Lineup: {entry.lineupIdeas[0]}</BodyText> : null}
+                                    {entry.tacticalBeats[0] ? <BodyText>Beat: {entry.tacticalBeats[0]}</BodyText> : null}
+                                    <BodyText>Updated: {formatDate(entry.savedAt)}</BodyText>
+                                </View>
+                            ))
+                        ) : (
+                            <BodyText>No encounter plans have written back into this campaign yet.</BodyText>
+                        )}
+                    </View>
+                </SystemPanel>
+            ) : null}
+
+            {activeSystemId === 'dnd5e' ? (
+                <SystemPanel systemId={activeSystemId}>
+                    <Label>Recent Treasure Ledger</Label>
+                    <View style={styles.resultRow}>
+                        {treasureLedger.length > 0 ? (
+                            treasureLedger.map((entry) => (
+                                <View key={entry.id} style={styles.linkedProjectButton}>
+                                    <Label>{entry.projectName || 'Linked treasure'}</Label>
+                                    <BodyText>
+                                        {entry.rarity} • {entry.rewardType} • {entry.rewardTheme} • {entry.rewardSource}
+                                    </BodyText>
+                                    <BodyText>{entry.rewardSummary}</BodyText>
+                                    <BodyText>
+                                        Featured: {entry.featuredItem}
+                                        {entry.bonusItem ? ` • Bonus: ${entry.bonusItem}` : ''}
+                                    </BodyText>
+                                    <BodyText>Coin & gem value: {entry.currencyValue.toLocaleString()}</BodyText>
+                                    {entry.recipientHints.length > 0 ? (
+                                        <BodyText>Best fit: {entry.recipientHints[0]}</BodyText>
+                                    ) : null}
+                                    <BodyText>Updated: {formatDate(entry.savedAt)}</BodyText>
+                                </View>
+                            ))
+                        ) : (
+                            <BodyText>No treasure awards have written back into this campaign yet.</BodyText>
+                        )}
+                    </View>
+                </SystemPanel>
+            ) : null}
+
+            {activeSystemId === 'dnd5e' ? (
+                <SystemPanel systemId={activeSystemId}>
+                    <Label>Recent Coin Awards</Label>
+                    <View style={styles.resultRow}>
+                        {treasuryAwards.length > 0 ? (
+                            treasuryAwards.map((entry) => (
+                                <View key={entry.id} style={styles.linkedProjectButton}>
+                                    <Label>{entry.projectName || 'Linked reward'}</Label>
+                                    <BodyText>{entry.amountGp.toLocaleString()} gp added to treasury</BodyText>
+                                    {entry.note ? <BodyText>{entry.note}</BodyText> : null}
+                                    <BodyText>Updated: {formatDate(entry.updatedAt)}</BodyText>
+                                </View>
+                            ))
+                        ) : (
+                            <BodyText>No generated coin awards have been posted into the treasury yet.</BodyText>
+                        )}
+                    </View>
+                </SystemPanel>
+            ) : null}
+
+            <SystemPanel systemId={activeSystemId}>
+                <Label>{campaignConfig.labels.snapshot}</Label>
                 <View style={styles.resultRow}>
                     <BodyText>{campaignSnapshot.toneSummary}</BodyText>
-                    <BodyText>Party: {partyName || 'No party name set'}</BodyText>
-                    <BodyText>Primary faction: {mainFaction || 'No faction set'}</BodyText>
+                    <BodyText>{campaignConfig.labels.party}: {partyName || 'No party name set'}</BodyText>
+                    <BodyText>{campaignConfig.labels.primaryFaction}: {mainFaction || 'No faction set'}</BodyText>
+                    {dndWorkbenchSnapshot ? <BodyText>Party sheets: {dndWorkbenchSnapshot.partyCount}</BodyText> : null}
+                    {dndWorkbenchSnapshot ? <BodyText>Tracked items: {dndWorkbenchSnapshot.inventoryCount}</BodyText> : null}
+                    {dndWorkbenchSnapshot ? <BodyText>Named NPCs: {dndWorkbenchSnapshot.npcCount}</BodyText> : null}
                 </View>
-            </Card>
+            </SystemPanel>
 
-            <Card>
-                <Label>Story Focus</Label>
+            <SystemPanel systemId={activeSystemId}>
+                <Label>{campaignConfig.labels.storyFocus}</Label>
                 <View style={styles.resultRow}>
-                    <BodyText>Summary: {campaignSnapshot.summary}</BodyText>
-                    <BodyText>Current objective: {campaignSnapshot.objective}</BodyText>
-                    <BodyText>Campaign pulse: {campaignSnapshot.campaignPulse}</BodyText>
+                    <BodyText>{campaignConfig.labels.summaryLead}: {campaignSnapshot.summary}</BodyText>
+                    <BodyText>{campaignConfig.labels.objectiveLead}: {campaignSnapshot.objective}</BodyText>
+                    <BodyText>{campaignConfig.labels.pulseLead}: {campaignSnapshot.campaignPulse}</BodyText>
                 </View>
-            </Card>
+            </SystemPanel>
 
-            <Card>
-                <Label>Session Readiness</Label>
+            <SystemPanel systemId={activeSystemId}>
+                <Label>{campaignConfig.labels.readiness}</Label>
                 <View style={styles.resultRow}>
                     <BodyText>{campaignSnapshot.notesState}</BodyText>
                 </View>
-            </Card>
+            </SystemPanel>
 
-            <Card>
-                <Label>Prep Angles</Label>
+            <SystemPanel systemId={activeSystemId}>
+                <Label>{campaignConfig.labels.prepAngles}</Label>
                 <View style={styles.resultRow}>
                     {campaignSnapshot.prepAngles.map((entry, index) => (
                         <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
                     ))}
                 </View>
-            </Card>
+            </SystemPanel>
 
-            <Card>
-                <Label>Linked Projects</Label>
+            <SystemPanel systemId={activeSystemId}>
+                <Label>{campaignConfig.labels.nextSession}</Label>
+                <View style={styles.resultRow}>
+                    {campaignSnapshot.sessionLens.map((entry, index) => (
+                        <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+                    ))}
+                </View>
+            </SystemPanel>
+
+            <SystemPanel systemId={activeSystemId}>
+                <Label>{campaignConfig.labels.factionMoves}</Label>
+                <View style={styles.resultRow}>
+                    {campaignSnapshot.factionMoves.map((entry, index) => (
+                        <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+                    ))}
+                </View>
+            </SystemPanel>
+
+            <SystemPanel systemId={activeSystemId}>
+                <Label>{campaignConfig.labels.stakes}</Label>
+                <View style={styles.resultRow}>
+                    {campaignSnapshot.stakes.map((entry, index) => (
+                        <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+                    ))}
+                </View>
+            </SystemPanel>
+
+            <SystemPanel systemId={activeSystemId}>
+                <Label>{campaignConfig.labels.linkedProjects}</Label>
                 {currentProjectId ? (
                     loadingLinks ? (
                         <View style={styles.sessionRow}>
@@ -567,24 +908,42 @@ export default function CampaignScreen() {
                         </View>
                     ) : linkedProjects.length > 0 ? (
                         <View style={styles.resultRow}>
-                            {linkedProjects.map((project) => (
-                                <Pressable
-                                    key={project.id}
-                                    onPress={() => openLinkedProject(project)}
-                                    style={styles.linkedProjectButton}
-                                >
-                                    <Label>{project.name}</Label>
-                                    <BodyText>{project.tool_type}</BodyText>
-                                </Pressable>
-                            ))}
+                            {linkedProjects.map((project) => {
+                                const projectSystemId = getProjectSystemId(project.data);
+                                const savedSystemLabel = getProjectSystemShortLabel(project.data);
+                                const toolBadge = getProjectToolBadge(project.tool_type, projectSystemId);
+                                const toolLabel = getProjectToolLabel(project.tool_type, projectSystemId);
+                                const summary = getProjectSummary(project.tool_type, project.data);
+
+                                return (
+                                    <Pressable
+                                        key={project.id}
+                                        onPress={() => openLinkedProject(project)}
+                                        style={styles.linkedProjectButton}
+                                    >
+                                        <View style={styles.metaPillRow}>
+                                            <View style={[styles.metaPill, styles.systemPill]}>
+                                                <BodyText style={styles.metaPillText}>{savedSystemLabel}</BodyText>
+                                            </View>
+                                            <View style={styles.metaPill}>
+                                                <BodyText style={styles.metaPillText}>{toolBadge}</BodyText>
+                                            </View>
+                                        </View>
+                                        <Label>{project.name}</Label>
+                                        <BodyText>{toolLabel}</BodyText>
+                                        <BodyText>{summary}</BodyText>
+                                        <BodyText>Updated: {formatDate(project.updated_at)}</BodyText>
+                                    </Pressable>
+                                );
+                            })}
                         </View>
                     ) : (
                         <BodyText>No linked projects yet. Pro tool screens can attach saved projects to this campaign.</BodyText>
                     )
-                ) : (
-                    <BodyText>Save this campaign first, then you can start linking projects to it.</BodyText>
-                )}
-            </Card>
+                    ) : (
+                        <BodyText>Save this campaign first, then you can start linking projects to it.</BodyText>
+                    )}
+            </SystemPanel>
         </Screen>
     );
 }
@@ -595,6 +954,13 @@ const styles = StyleSheet.create({
         gap: Spacing.sm,
         flexWrap: 'wrap',
     },
+    heroMetaRow: {
+        gap: 4,
+        paddingTop: Spacing.xs,
+    },
+    heroMetaLabel: {
+        color: Colors.text,
+    },
     pill: {
         backgroundColor: Colors.elevated,
         borderRadius: 999,
@@ -602,10 +968,6 @@ const styles = StyleSheet.create({
         borderColor: Colors.border,
         paddingVertical: 10,
         paddingHorizontal: 14,
-    },
-    pillSelected: {
-        backgroundColor: Colors.accent,
-        borderColor: Colors.accent,
     },
     pillTextSelected: {
         color: '#fff',
@@ -661,5 +1023,24 @@ const styles = StyleSheet.create({
         borderColor: Colors.border,
         padding: 12,
         gap: 4,
+    },
+    metaPillRow: {
+        flexDirection: 'row',
+        gap: Spacing.xs,
+        flexWrap: 'wrap',
+    },
+    metaPill: {
+        backgroundColor: Colors.elevated,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: Colors.border,
+        paddingVertical: 4,
+        paddingHorizontal: 10,
+    },
+    systemPill: {
+        borderColor: Colors.accent,
+    },
+    metaPillText: {
+        color: Colors.text,
     },
 });

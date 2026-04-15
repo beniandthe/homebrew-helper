@@ -6,12 +6,14 @@ import { useBilling } from '@/contexts/BillingContext';
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Heading, Label } from '@/components/AppText';
 import { Card } from '@/components/Card';
+import { RulesetIdentityCard } from '@/components/RulesetIdentityCard';
 import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { buildAuthRedirectUrl } from '@/lib/authRedirect';
 import { formatBillingProvider, formatBillingStore } from '@/lib/billing';
 import { supabase } from '@/lib/supabase';
 import { isNativePlanPreview } from '@/lib/subscriptionUi';
+import { useGameSystem } from '@/contexts/GameSystemContext';
 
 function formatPlanDate(value: string | null) {
   if (!value) return null;
@@ -30,6 +32,7 @@ function formatPlanDate(value: string | null) {
 export default function AccountScreen() {
   const configured = Boolean(supabase);
   const enableDevBilling = process.env.EXPO_PUBLIC_ENABLE_DEV_BILLING === 'true';
+  const { activeSystem } = useGameSystem();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -266,6 +269,15 @@ export default function AccountScreen() {
           <BodyText>No active session.</BodyText>
         )}
       </Card>
+
+      {activeSystem.attribution ? (
+        <RulesetIdentityCard
+          system={activeSystem}
+          label="Current Ruleset"
+          showIdentity={false}
+          showAttribution
+        />
+      ) : null}
 
       {isSignedIn ? (
         <>

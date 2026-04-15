@@ -6,19 +6,28 @@ import { useAppState } from '@/contexts/AppStateContext';
 import { ProCard } from '@/components/ProCard';
 import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
-import { BodyText, Heading, Label } from '@/components/AppText';
-import { Card } from '@/components/Card';
+import { BodyText, Label } from '@/components/AppText';
 import { Screen } from '@/components/Screen';
+import { SystemHero } from '@/components/SystemHero';
+import { SystemPanel } from '@/components/SystemPanel';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { useGameSystem } from '@/contexts/GameSystemContext';
+import { buildDndCampaignLinkContext } from '@/lib/dndCampaignLinkContext';
 import { buildSeed, pickManyFromPool } from '@/lib/generation';
-import { fetchCampaignOptions, fetchLatestSaveAccess, getErrorMessage } from '@/lib/projectAccess';
+import { getGameSystem, resolveGameSystemId, type GameSystemId } from '@/lib/gameSystems';
+import {
+  applyCampaignSystemToPayload,
+  fetchCampaignOptionById,
+  fetchCampaignOptions,
+  fetchLatestSaveAccess,
+  getErrorMessage,
+  type CampaignOption,
+} from '@/lib/projectAccess';
+import { getXpSystemConfig, type CurveType, type ProgressionMode, type ProgressionPreset } from '@/lib/systemTooling';
+import { getSystemPresentation } from '@/lib/systemPresentation';
 import { getCampaignLinkUpsell, getFreeLimitUpsell } from '@/lib/subscriptionUi';
-
-type CurveType = 'linear' | 'smooth' | 'steep';
-type ProgressionPreset = 'slow' | 'standard' | 'heroic' | 'brutal' | 'custom';
-type ProgressionMode = 'xp' | 'milestone';
 
 type XpProjectData = {
   levels?: number;
@@ -30,31 +39,46 @@ type XpProjectData = {
   encountersPerSession?: number;
   encountersPerLevel?: number;
   progressionNotes?: string;
-};
-
-type CampaignOption = {
-  id: string;
-  name: string;
+  systemId?: GameSystemId;
+  systemName?: string;
 };
 
 export default function XpCalculatorScreen() {
   const params = useLocalSearchParams<{ projectId?: string }>();
+  const { activeSystemId, setActiveSystemId } = useGameSystem();
+  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [lockedCampaignSystemId, setLockedCampaignSystemId] = useState<GameSystemId | null>(null);
+  const selectedCampaign = useMemo(
+    () => campaignOptions.find((campaign) => campaign.id === selectedCampaignId) ?? null,
+    [campaignOptions, selectedCampaignId]
+  );
+  const effectiveSystemId = lockedCampaignSystemId ?? activeSystemId;
+  const effectiveSystem = useMemo(() => getGameSystem(effectiveSystemId), [effectiveSystemId]);
+  const xpConfig = useMemo(() => getXpSystemConfig(effectiveSystemId), [effectiveSystemId]);
+  const palette = useMemo(() => getSystemPresentation(effectiveSystemId).palette, [effectiveSystemId]);
+  const dndCampaignContext = useMemo(
+    () => (effectiveSystemId === 'dnd5e' ? buildDndCampaignLinkContext(selectedCampaign?.data) : null),
+    [effectiveSystemId, selectedCampaign?.data]
+  );
 
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
 
-  const [levels, setLevels] = useState('20');
-  const [baseXp, setBaseXp] = useState('100');
-  const [growthFactor, setGrowthFactor] = useState('1.3');
-  const [curveType, setCurveType] = useState<CurveType>('smooth');
+  const [levels, setLevels] = useState(xpConfig.defaults.levels);
+  const [baseXp, setBaseXp] = useState(xpConfig.defaults.baseXp);
+  const [growthFactor, setGrowthFactor] = useState(xpConfig.defaults.growthFactor);
+  const [curveType, setCurveType] = useState<CurveType>(xpConfig.defaults.curveType);
 
-  const [progressionPreset, setProgressionPreset] = useState<ProgressionPreset>('standard');
-  const [progressionMode, setProgressionMode] = useState<ProgressionMode>('xp');
-  const [encountersPerSession, setEncountersPerSession] = useState('2');
-  const [encountersPerLevel, setEncountersPerLevel] = useState('4');
+  const [progressionPreset, setProgressionPreset] = useState<ProgressionPreset>(xpConfig.defaults.progressionPreset);
+  const [progressionMode, setProgressionMode] = useState<ProgressionMode>(xpConfig.defaults.progressionMode);
+  const [encountersPerSession, setEncountersPerSession] = useState(xpConfig.defaults.encountersPerSession);
+  const [encountersPerLevel, setEncountersPerLevel] = useState(xpConfig.defaults.encountersPerLevel);
   const [progressionNotes, setProgressionNotes] = useState('');
   const [variationSeed, setVariationSeed] = useState(0);
+  const [appliedCampaignDefaultsId, setAppliedCampaignDefaultsId] = useState('');
 
   const [saving, setSaving] = useState(false);
 
@@ -78,10 +102,6 @@ export default function XpCalculatorScreen() {
   const freeLimitUpsell = getFreeLimitUpsell(maxFreeSaves);
   const campaignLinkUpsell = getCampaignLinkUpsell('This progression plan');
 
-  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
-  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
-
   function setBanner(
     variant: StatusBannerVariant,
     title: string,
@@ -93,36 +113,20 @@ export default function XpCalculatorScreen() {
   function applyPreset(preset: ProgressionPreset) {
     setProgressionPreset(preset);
 
-    if (preset === 'slow') {
-      setBaseXp('140');
-      setGrowthFactor('1.4');
-      setCurveType('steep');
-      setEncountersPerLevel('6');
+    if (preset === 'custom') {
       return;
     }
 
-    if (preset === 'standard') {
-      setBaseXp('100');
-      setGrowthFactor('1.3');
-      setCurveType('smooth');
-      setEncountersPerLevel('4');
-      return;
-    }
+    const presetValues = xpConfig.presets[preset];
 
-    if (preset === 'heroic') {
-      setBaseXp('80');
-      setGrowthFactor('1.18');
-      setCurveType('smooth');
-      setEncountersPerLevel('3');
-      return;
-    }
+    setBaseXp(presetValues.baseXp);
+    setGrowthFactor(presetValues.growthFactor);
+    setCurveType(presetValues.curveType);
+    setEncountersPerLevel(presetValues.encountersPerLevel);
+    setEncountersPerSession(presetValues.encountersPerSession);
 
-    if (preset === 'brutal') {
-      setBaseXp('160');
-      setGrowthFactor('1.45');
-      setCurveType('steep');
-      setEncountersPerLevel('7');
-      return;
+    if (presetValues.progressionMode) {
+      setProgressionMode(presetValues.progressionMode);
     }
   }
 
@@ -167,6 +171,68 @@ export default function XpCalculatorScreen() {
   }, [isPro]);
 
   useEffect(() => {
+    if (params.projectId || currentProjectId) {
+      return;
+    }
+
+    setLevels(xpConfig.defaults.levels);
+    setBaseXp(xpConfig.defaults.baseXp);
+    setGrowthFactor(xpConfig.defaults.growthFactor);
+    setCurveType(xpConfig.defaults.curveType);
+    setProgressionPreset(xpConfig.defaults.progressionPreset);
+    setProgressionMode(xpConfig.defaults.progressionMode);
+    setEncountersPerSession(xpConfig.defaults.encountersPerSession);
+    setEncountersPerLevel(xpConfig.defaults.encountersPerLevel);
+    setProgressionNotes('');
+    setVariationSeed(0);
+    setAppliedCampaignDefaultsId('');
+  }, [xpConfig, params.projectId, currentProjectId]);
+
+  useEffect(() => {
+    if (!selectedCampaignId) {
+      setAppliedCampaignDefaultsId('');
+      return;
+    }
+
+    if (effectiveSystemId !== 'dnd5e' || !dndCampaignContext) {
+      return;
+    }
+
+    if (params.projectId || currentProjectId || appliedCampaignDefaultsId === selectedCampaignId) {
+      return;
+    }
+
+    if (dndCampaignContext.suggestedPlanLevels) {
+      setLevels(String(dndCampaignContext.suggestedPlanLevels));
+    }
+
+    if (progressionNotes.trim().length === 0) {
+      const seededNotes = [
+        dndCampaignContext.tierLabel ? `Current tier: ${dndCampaignContext.tierLabel}.` : null,
+        dndCampaignContext.averageLevel ? `Average party level: ${dndCampaignContext.averageLevel}.` : null,
+        dndCampaignContext.currentObjective ? `Current objective: ${dndCampaignContext.currentObjective}.` : null,
+        dndCampaignContext.partyName ? `Party: ${dndCampaignContext.partyName}.` : null,
+      ]
+        .filter(Boolean)
+        .join(' ');
+
+      if (seededNotes) {
+        setProgressionNotes(seededNotes);
+      }
+    }
+
+    setAppliedCampaignDefaultsId(selectedCampaignId);
+  }, [
+    appliedCampaignDefaultsId,
+    currentProjectId,
+    dndCampaignContext,
+    effectiveSystemId,
+    params.projectId,
+    progressionNotes,
+    selectedCampaignId,
+  ]);
+
+  useEffect(() => {
     async function loadProject() {
       if (!supabase) return;
       if (!sessionUserId) return;
@@ -175,6 +241,7 @@ export default function XpCalculatorScreen() {
         setLoadedProjectName(null);
         setCurrentProjectId(null);
         setSelectedCampaignId('');
+        setLockedCampaignSystemId(null);
         return;
       }
 
@@ -194,11 +261,21 @@ export default function XpCalculatorScreen() {
         }
 
         const projectData = (data?.data ?? {}) as XpProjectData;
+        let linkedCampaign: CampaignOption | null = null;
 
         if (typeof data?.campaign_id === 'string' && isPro) {
           setSelectedCampaignId(data.campaign_id);
+          linkedCampaign = await fetchCampaignOptionById(supabase, sessionUserId, data.campaign_id);
         } else {
           setSelectedCampaignId('');
+          setLockedCampaignSystemId(null);
+        }
+
+        if (linkedCampaign) {
+          setLockedCampaignSystemId(linkedCampaign.systemId);
+          setActiveSystemId(linkedCampaign.systemId);
+        } else if (projectData.systemId || projectData.systemName) {
+          setActiveSystemId(resolveGameSystemId(projectData.systemId ?? projectData.systemName));
         }
 
         if (typeof projectData.levels === 'number') {
@@ -255,7 +332,7 @@ export default function XpCalculatorScreen() {
     }
 
     loadProject();
-  }, [params.projectId, sessionUserId, isPro]);
+  }, [params.projectId, sessionUserId, isPro, setActiveSystemId]);
 
   const result = useMemo(() => {
     const parsedLevels = Math.max(1, Number.parseInt(levels || '1', 10));
@@ -279,7 +356,9 @@ export default function XpCalculatorScreen() {
         progressionMode === 'milestone'
           ? 0
           : curveType === 'linear'
-            ? parsedBaseXp * level
+            ? xpConfig.linearStrategy === 'flat'
+              ? parsedBaseXp
+              : parsedBaseXp * level
             : Math.round(parsedBaseXp * Math.pow(multiplier, level - 1));
 
       total += xpToNext;
@@ -294,17 +373,10 @@ export default function XpCalculatorScreen() {
     const totalEncounterCount = parsedLevels * parsedEncountersPerLevel;
     const estimatedSessionsToCap = Math.ceil(totalEncounterCount / parsedEncountersPerSession);
 
-    let pacingAssessment = 'Balanced long-form pacing.';
-    if (parsedEncountersPerLevel <= 3) pacingAssessment = 'Fast, heroic pacing with frequent advancement.';
-    if (parsedEncountersPerLevel >= 6) pacingAssessment = 'Slow-burn pacing suited for long campaigns or gritty systems.';
-    if (progressionMode === 'milestone') pacingAssessment = 'Milestone pacing prioritizes narrative beats over combat math.';
-
-    const milestoneSuggestions = [
-      `Level 3: establish subclass, specialization, or defining class identity.`,
-      `Level ${Math.max(4, Math.floor(parsedLevels * 0.35))}: grant a major gear, faction, or narrative unlock.`,
-      `Level ${Math.max(6, Math.floor(parsedLevels * 0.6))}: introduce a strong power spike or campaign shift.`,
-      `Level ${parsedLevels}: reserve for endgame mastery, capstone, or finale content.`,
-    ];
+    let pacingAssessment = xpConfig.pacingAssessment.default;
+    if (parsedEncountersPerLevel <= 3) pacingAssessment = xpConfig.pacingAssessment.fast;
+    if (parsedEncountersPerLevel >= 6) pacingAssessment = xpConfig.pacingAssessment.slow;
+    if (progressionMode === 'milestone') pacingAssessment = xpConfig.pacingAssessment.milestone;
 
     const seed = buildSeed(
       [
@@ -324,61 +396,39 @@ export default function XpCalculatorScreen() {
     const practicalAdvice: string[] = [];
 
     if (progressionMode === 'milestone') {
-      practicalAdvice.push('Use milestone mode when campaign pacing should follow story victories rather than encounter frequency.');
+      practicalAdvice.push(xpConfig.advice.milestoneMode);
     } else {
-      practicalAdvice.push('XP mode works best when encounter count and challenge are relatively consistent session to session.');
+      practicalAdvice.push(xpConfig.advice.xpMode);
     }
 
     if (parsedEncountersPerSession === 1) {
-      practicalAdvice.push('One encounter per session can make XP pacing feel very slow unless rewards are large or milestone beats are frequent.');
+      practicalAdvice.push(xpConfig.advice.singleSession);
     }
 
     if (parsedEncountersPerLevel >= 6) {
-      practicalAdvice.push('High encounters-per-level pacing can create grind unless each level meaningfully changes player options.');
+      practicalAdvice.push(xpConfig.advice.highEncounterCount);
     }
 
     if (curveType === 'steep') {
-      practicalAdvice.push('Steep curves are strongest when late-game levels are intentionally rare and dramatic.');
+      practicalAdvice.push(xpConfig.advice.steepCurve);
     }
 
     if (curveType === 'linear') {
-      practicalAdvice.push('Linear curves are easier to communicate and tune, but may feel less dramatic over time.');
+      practicalAdvice.push(xpConfig.advice.linearCurve);
     }
 
     if (practicalAdvice.length === 0) {
-      practicalAdvice.push('This progression setup should be broadly usable for a typical campaign arc.');
+      practicalAdvice.push(xpConfig.advice.default);
     }
 
     const pacingVariants = pickManyFromPool(
-      [
-        'Give bonus XP for social and exploration wins to stabilize uneven combat schedules.',
-        'Batch level-ups at chapter breaks so power spikes align with story arcs.',
-        'Use downtime milestones to smooth campaigns with irregular attendance.',
-        'Mark one “catch-up” level where under-leveled characters can close the gap.',
-        'Reserve one bonus progression beat for completing a personal character goal.',
-        'Gate high-level features behind faction or world unlocks to pace late-game complexity.',
-        'Award “goal XP” for completing prep-defined objectives unrelated to combat.',
-        'Use level sync windows so new characters can join without lagging far behind.',
-        'Replace one grind-heavy level with a narrative training montage advancement.',
-        'Tie one level-up to a region unlock so exploration directly feeds progression.',
-        'Offer optional hard-mode encounters that grant accelerated progression.',
-        'Convert failed missions into partial XP so losses still advance the campaign.',
-      ],
+      xpConfig.pacingVariantPool,
       2,
       seed + 19
     );
 
-    const milestoneVariantSuggestions = pickManyFromPool(
-      [
-        `Level ${Math.max(2, Math.floor(parsedLevels * 0.2))}: add a defensive feature or survivability bump.`,
-        `Level ${Math.max(5, Math.floor(parsedLevels * 0.45))}: unlock faction command privileges or social leverage.`,
-        `Level ${Math.max(7, Math.floor(parsedLevels * 0.7))}: introduce advanced tactical options or signature spell tier.`,
-        `Level ${Math.max(8, Math.floor(parsedLevels * 0.8))}: provide travel, teleport, or strategic mobility access.`,
-        `Level ${Math.max(9, parsedLevels - 2)}: preview finale mechanics with a controlled challenge.`,
-      ],
-      2,
-      seed + 41
-    );
+    const milestoneSuggestions = xpConfig.milestoneBase(parsedLevels);
+    const milestoneVariantSuggestions = pickManyFromPool(xpConfig.milestoneVariants(parsedLevels), 2, seed + 41);
 
     const orderedMilestoneSuggestions = [...milestoneSuggestions, ...milestoneVariantSuggestions].sort((a, b) => {
       const levelA = Number.parseInt(a.match(/Level\s+(\d+)/i)?.[1] ?? '0', 10);
@@ -406,6 +456,7 @@ export default function XpCalculatorScreen() {
     progressionPreset,
     progressionNotes,
     variationSeed,
+    xpConfig,
   ]);
 
   function buildPayload() {
@@ -419,6 +470,8 @@ export default function XpCalculatorScreen() {
       encountersPerSession: Number.parseInt(encountersPerSession || '1', 10),
       encountersPerLevel: Number.parseInt(encountersPerLevel || '1', 10),
       progressionNotes,
+      systemId: effectiveSystemId,
+      systemName: effectiveSystem.label,
       variationSeed,
       result,
     };
@@ -439,8 +492,9 @@ export default function XpCalculatorScreen() {
     try {
       setSaving(true);
 
-      const payload = buildPayload();
+      const payload = applyCampaignSystemToPayload(buildPayload(), selectedCampaign);
       const timestampName = `XP Planner - ${new Date().toLocaleString()}`;
+      const campaignMessage = selectedCampaign ? ` in ${selectedCampaign.name}` : '';
 
       if (!asNew && currentProjectId) {
         const { error } = await supabase
@@ -449,7 +503,7 @@ export default function XpCalculatorScreen() {
             name: loadedProjectName ?? timestampName,
             data: payload,
             updated_at: new Date().toISOString(),
-            campaign_id: null,
+            campaign_id: selectedCampaignId || null,
           })
           .eq('id', currentProjectId)
           .eq('user_id', sessionUserId);
@@ -460,8 +514,7 @@ export default function XpCalculatorScreen() {
         }
 
         await refreshAppState();
-        setSelectedCampaignId('');
-        setBanner('success', 'Updated', 'Your progression project was updated successfully.');
+        setBanner('success', 'Updated', `Your progression project was updated successfully${campaignMessage}.`);
         return;
       }
 
@@ -483,7 +536,7 @@ export default function XpCalculatorScreen() {
           name: timestampName,
           tool_type: 'xp_calculator',
           data: payload,
-          campaign_id: null,
+          campaign_id: selectedCampaignId || null,
         })
         .select()
         .single();
@@ -495,10 +548,9 @@ export default function XpCalculatorScreen() {
 
       setLoadedProjectName(data?.name ?? timestampName);
       setCurrentProjectId(data?.id ?? null);
-      setSelectedCampaignId('');
       await refreshAppState();
 
-      setBanner('success', 'Saved', 'Your progression project was saved successfully.');
+      setBanner('success', 'Saved', `Your progression project was saved successfully${campaignMessage}.`);
     } finally {
       setSaving(false);
     }
@@ -532,7 +584,7 @@ export default function XpCalculatorScreen() {
     try {
       setSaving(true);
 
-      const payload = buildPayload();
+      const payload = applyCampaignSystemToPayload(buildPayload(), selectedCampaign);
       const timestampName = loadedProjectName ?? `XP Planner - ${new Date().toLocaleString()}`;
 
       if (currentProjectId) {
@@ -597,12 +649,25 @@ export default function XpCalculatorScreen() {
 
   return (
     <Screen>
-      <Card>
-        <Heading>Progression Planner</Heading>
-        <BodyText>
-          Plan leveling pace, compare advancement styles, and estimate how long a campaign takes to reach key milestones.
-        </BodyText>
-      </Card>
+      <SystemHero
+        systemId={effectiveSystemId}
+        eyebrow={effectiveSystem.shortLabel}
+        title={effectiveSystem.xp.title}
+        body={effectiveSystem.xp.description}
+        chips={[
+          xpConfig.modeLabels[progressionMode],
+          dndCampaignContext ? dndCampaignContext.tierLabel : xpConfig.presetLabels[progressionPreset],
+          `${levels || xpConfig.defaults.levels} levels`,
+          selectedCampaign ? `Campaign: ${selectedCampaign.name}` : 'Standalone planner',
+        ]}
+      >
+        {loadedProjectName ? (
+          <View style={styles.heroMetaRow}>
+            <Label style={styles.heroMetaLabel}>Loaded project</Label>
+            <BodyText>{loadedProjectName}</BodyText>
+          </View>
+        ) : null}
+      </SystemHero>
 
       {statusBanner ? (
         <StatusBanner
@@ -621,49 +686,37 @@ export default function XpCalculatorScreen() {
       />
 
       {loadingProject ? (
-        <Card>
+        <SystemPanel systemId={effectiveSystemId} tone="muted">
           <View style={styles.sessionRow}>
             <ActivityIndicator />
             <BodyText>Loading saved project...</BodyText>
           </View>
-        </Card>
+        </SystemPanel>
       ) : loadedProjectName ? (
-        <Card>
+        <SystemPanel systemId={effectiveSystemId} tone="muted">
           <Label>Loaded project</Label>
           <BodyText>{loadedProjectName}</BodyText>
           {currentProjectId ? <BodyText>ID: {currentProjectId}</BodyText> : null}
-        </Card>
+        </SystemPanel>
       ) : null}
 
-      <Card>
+      <SystemPanel systemId={effectiveSystemId} tone="accent">
         <Label>Campaign Link</Label>
 
         {!isPro ? (
-            <View style={styles.proLockedBlock}>
-              <View style={styles.proLockedHeader}>
-                <Label style={styles.proLockedTitle}>★ {campaignLinkUpsell.lockedTitle}</Label>
-                <BodyText style={styles.proLockedText}>
-                  {campaignLinkUpsell.lockedMessage}
-                </BodyText>
-              </View>
-
-            <View style={styles.lockedPillRow}>
-              <View style={[styles.pill, styles.lockedPill]}>
-                <BodyText style={styles.lockedPillText}>none</BodyText>
-              </View>
-              <View style={[styles.pill, styles.lockedPill]}>
-                <BodyText style={styles.lockedPillText}>Campaign Alpha</BodyText>
-              </View>
-              <View style={[styles.pill, styles.lockedPill]}>
-                <BodyText style={styles.lockedPillText}>Boss Arc</BodyText>
-              </View>
+          <View style={styles.proLockedBlock}>
+            <View style={styles.proLockedHeader}>
+              <Label style={styles.proLockedTitle}>★ {campaignLinkUpsell.lockedTitle}</Label>
+              <BodyText style={styles.proLockedText}>
+                {campaignLinkUpsell.lockedMessage}
+              </BodyText>
             </View>
 
             <BodyText style={styles.proLockedHint}>
               {campaignLinkUpsell.message}
             </BodyText>
 
-            <Pressable onPress={handleUpgradePress} style={styles.inlineUpgradeButton}>
+            <Pressable onPress={handleUpgradePress} style={[styles.inlineUpgradeButton, { backgroundColor: palette.accent }]}>
               <Label style={styles.inlineUpgradeButtonText}>{campaignLinkUpsell.buttonLabel}</Label>
             </Pressable>
           </View>
@@ -675,8 +728,11 @@ export default function XpCalculatorScreen() {
         ) : campaignOptions.length > 0 ? (
           <View style={styles.pillRow}>
             <Pressable
-              onPress={() => setSelectedCampaignId('')}
-              style={[styles.pill, selectedCampaignId === '' && styles.pillSelected]}
+              onPress={() => {
+                setSelectedCampaignId('');
+                setLockedCampaignSystemId(null);
+              }}
+              style={[styles.pill, selectedCampaignId === '' && { backgroundColor: palette.accent, borderColor: palette.accent }]}
             >
               <BodyText style={selectedCampaignId === '' ? styles.pillTextSelected : undefined}>
                 none
@@ -689,11 +745,15 @@ export default function XpCalculatorScreen() {
               return (
                 <Pressable
                   key={campaign.id}
-                  onPress={() => setSelectedCampaignId(campaign.id)}
-                  style={[styles.pill, selected && styles.pillSelected]}
+                  onPress={() => {
+                    setSelectedCampaignId(campaign.id);
+                    setLockedCampaignSystemId(campaign.systemId);
+                    setActiveSystemId(campaign.systemId);
+                  }}
+                  style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
                 >
                   <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                    {campaign.name}
+                    {campaign.name} • {campaign.systemShortLabel}
                   </BodyText>
                 </Pressable>
               );
@@ -703,7 +763,23 @@ export default function XpCalculatorScreen() {
           <BodyText>No saved campaigns yet. Create one in Campaign Hub to link this project.</BodyText>
         )}
 
-        <Label>Progression Preset</Label>
+        {selectedCampaign ? (
+          <BodyText>Ruleset locked to {selectedCampaign.systemName} while linked to {selectedCampaign.name}.</BodyText>
+        ) : null}
+
+        {dndCampaignContext ? (
+          <View style={styles.resultRow}>
+            <BodyText>
+              Imported from campaign: {dndCampaignContext.partySize} hero sheets, average level{' '}
+              {dndCampaignContext.averageLevel ?? 'n/a'}, {dndCampaignContext.tierLabel}.
+            </BodyText>
+            {dndCampaignContext.currentObjective ? (
+              <BodyText>Current campaign objective: {dndCampaignContext.currentObjective}</BodyText>
+            ) : null}
+          </View>
+        ) : null}
+
+        <Label>{xpConfig.labels.preset}</Label>
         <View style={styles.pillRow}>
           {(['slow', 'standard', 'heroic', 'brutal', 'custom'] as ProgressionPreset[]).map((option) => {
             const selected = progressionPreset === option;
@@ -718,17 +794,17 @@ export default function XpCalculatorScreen() {
                   }
                   applyPreset(option);
                 }}
-                style={[styles.pill, selected && styles.pillSelected]}
+                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
               >
                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                  {option}
+                  {xpConfig.presetLabels[option]}
                 </BodyText>
               </Pressable>
             );
           })}
         </View>
 
-        <Label>Progression Mode</Label>
+        <Label>{xpConfig.labels.mode}</Label>
         <View style={styles.pillRow}>
           {(['xp', 'milestone'] as ProgressionMode[]).map((option) => {
             const selected = progressionMode === option;
@@ -737,25 +813,25 @@ export default function XpCalculatorScreen() {
               <Pressable
                 key={option}
                 onPress={() => setProgressionMode(option)}
-                style={[styles.pill, selected && styles.pillSelected]}
+                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
               >
                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                  {option}
+                  {xpConfig.modeLabels[option]}
                 </BodyText>
               </Pressable>
             );
           })}
         </View>
 
-        <Label>Number of Levels</Label>
+        <Label>{xpConfig.labels.levels}</Label>
         <AppInput
           value={levels}
           onChangeText={setLevels}
           keyboardType="numeric"
-          placeholder="20"
+          placeholder={xpConfig.defaults.levels}
         />
 
-        <Label>Base XP</Label>
+        <Label>{xpConfig.labels.baseXp}</Label>
         <AppInput
           value={baseXp}
           onChangeText={(value) => {
@@ -763,10 +839,10 @@ export default function XpCalculatorScreen() {
             setBaseXp(value);
           }}
           keyboardType="numeric"
-          placeholder="100"
+          placeholder={xpConfig.defaults.baseXp}
         />
 
-        <Label>Growth Factor</Label>
+        <Label>{xpConfig.labels.growthFactor}</Label>
         <AppInput
           value={growthFactor}
           onChangeText={(value) => {
@@ -774,10 +850,10 @@ export default function XpCalculatorScreen() {
             setGrowthFactor(value);
           }}
           keyboardType="decimal-pad"
-          placeholder="1.3"
+          placeholder={xpConfig.defaults.growthFactor}
         />
 
-        <Label>Curve Type</Label>
+        <Label>{xpConfig.labels.curve}</Label>
         <View style={styles.pillRow}>
           {(['linear', 'smooth', 'steep'] as CurveType[]).map((option) => {
             const selected = curveType === option;
@@ -789,41 +865,41 @@ export default function XpCalculatorScreen() {
                   setProgressionPreset('custom');
                   setCurveType(option);
                 }}
-                style={[styles.pill, selected && styles.pillSelected]}
+                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
               >
                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                  {option}
+                  {xpConfig.curveLabels[option]}
                 </BodyText>
               </Pressable>
             );
           })}
         </View>
 
-        <Label>Encounters per Session</Label>
+        <Label>{xpConfig.labels.encountersPerSession}</Label>
         <AppInput
           value={encountersPerSession}
           onChangeText={setEncountersPerSession}
           keyboardType="numeric"
-          placeholder="2"
+          placeholder={xpConfig.defaults.encountersPerSession}
         />
 
-        <Label>Expected Encounters per Level</Label>
+        <Label>{xpConfig.labels.encountersPerLevel}</Label>
         <AppInput
           value={encountersPerLevel}
           onChangeText={setEncountersPerLevel}
           keyboardType="numeric"
-          placeholder="4"
+          placeholder={xpConfig.defaults.encountersPerLevel}
         />
 
-        <Label>Progression Notes</Label>
+        <Label>{xpConfig.labels.notes}</Label>
         <AppInput
           value={progressionNotes}
           onChangeText={setProgressionNotes}
-          placeholder="Subclass unlock at 3, faction milestone at 6, artifact tier at 10..."
+          placeholder={xpConfig.labels.notesPlaceholder}
           multiline
         />
         <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
-          <Label style={styles.secondaryButtonText}>Reroll Pacing Ideas</Label>
+          <Label style={styles.secondaryButtonText}>{xpConfig.labels.rerollButton}</Label>
         </Pressable>
 
         <View style={styles.saveRow}>
@@ -831,10 +907,22 @@ export default function XpCalculatorScreen() {
             <Pressable
               onPress={() => handleSaveProject(false)}
               disabled={saving || loadingSession}
-              style={[styles.saveButton, (saving || loadingSession) && styles.saveButtonDisabled]}
+              style={[
+                styles.saveButton,
+                { backgroundColor: palette.accent },
+                (saving || loadingSession) && styles.saveButtonDisabled,
+              ]}
             >
               <Label style={styles.saveButtonText}>
-                {saving ? 'Saving...' : currentProjectId ? 'Update Project' : 'Save Project'}
+                {saving
+                  ? 'Saving...'
+                  : currentProjectId
+                    ? selectedCampaignId
+                      ? 'Update Linked Project'
+                      : 'Update Project'
+                    : selectedCampaignId
+                      ? 'Save to Campaign'
+                      : 'Save Project'}
               </Label>
             </Pressable>
 
@@ -851,15 +939,16 @@ export default function XpCalculatorScreen() {
               disabled={saving || loadingSession || !isPro || !selectedCampaignId}
               style={[
                 styles.campaignButton,
+                { borderColor: palette.accent },
                 (saving || loadingSession || !isPro || !selectedCampaignId) && styles.saveButtonDisabled,
               ]}
             >
               <Label style={styles.campaignButtonText}>
                 {!isPro
-                  ? 'Add to Campaign'
+                  ? 'Link to Campaign'
                   : currentProjectId && selectedCampaignId
-                    ? 'Update Campaign'
-                    : 'Add to Campaign'}
+                    ? 'Relink Campaign'
+                    : 'Link to Campaign'}
               </Label>
             </Pressable>
           </View>
@@ -872,8 +961,10 @@ export default function XpCalculatorScreen() {
           ) : sessionUserId ? (
             <BodyText>
               {currentProjectId
-                ? 'Loaded project detected. You can update it, save a new copy, or add it to a campaign.'
-                : 'Signed in. Saving is enabled.'}
+                ? 'Loaded project detected. Save respects the selected campaign automatically, or save a new copy.'
+                : selectedCampaignId
+                  ? 'Signed in. Save Project will use the selected campaign by default.'
+                  : 'Signed in. Saving is enabled.'}
             </BodyText>
           ) : (
             <BodyText>Not signed in. You can calculate, but not save yet.</BodyText>
@@ -888,21 +979,37 @@ export default function XpCalculatorScreen() {
             />
           ) : null}
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Pacing Summary</Label>
+      {dndCampaignContext ? (
+        <SystemPanel systemId={effectiveSystemId}>
+          <Label>Linked Party Context</Label>
+          <View style={styles.resultRow}>
+            {dndCampaignContext.partySummaryLines.length > 0 ? (
+              dndCampaignContext.partySummaryLines.map((entry, index) => (
+                <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+              ))
+            ) : (
+              <BodyText>No hero sheets are logged in the linked campaign yet.</BodyText>
+            )}
+            <BodyText>{dndCampaignContext.treasurySummary}</BodyText>
+          </View>
+        </SystemPanel>
+      ) : null}
+
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{xpConfig.labels.pacingSummary}</Label>
         <View style={styles.resultRow}>
           <BodyText>{result.pacingAssessment}</BodyText>
           <BodyText>Estimated total encounters: {result.totalEncounterCount}</BodyText>
           <BodyText>Estimated sessions to cap: {result.estimatedSessionsToCap}</BodyText>
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Leveling Preview</Label>
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{xpConfig.labels.levelingPreview}</Label>
         {progressionMode === 'milestone' ? (
-          <BodyText>Milestone mode is active. Advancement is guided by story beats rather than XP totals.</BodyText>
+          <BodyText>{xpConfig.labels.milestoneModeCopy}</BodyText>
         ) : (
           <>
             {result.rows.slice(0, 10).map((row) => (
@@ -917,34 +1024,34 @@ export default function XpCalculatorScreen() {
             ) : null}
           </>
         )}
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Milestone Suggestions</Label>
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{xpConfig.labels.milestoneSuggestions}</Label>
         <View style={styles.resultRow}>
           {result.milestoneSuggestions.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Practical Advice</Label>
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{xpConfig.labels.practicalAdvice}</Label>
         <View style={styles.resultRow}>
           {result.practicalAdvice.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Optional Pacing Variants</Label>
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{xpConfig.labels.optionalPacingVariants}</Label>
         <View style={styles.resultRow}>
           {result.pacingVariants.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </Card>
+      </SystemPanel>
     </Screen>
   );
 }
@@ -954,6 +1061,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.sm,
     flexWrap: 'wrap',
+  },
+  heroMetaRow: {
+    gap: 4,
+    paddingTop: Spacing.xs,
+  },
+  heroMetaLabel: {
+    color: Colors.text,
   },
   pill: {
     backgroundColor: Colors.elevated,

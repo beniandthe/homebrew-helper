@@ -2,14 +2,21 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 
 import { BodyText, Heading, Label } from '@/components/AppText';
-import { Card } from '@/components/Card';
+import { GameSystemPicker } from '@/components/GameSystemPicker';
+import { RulesetIdentityCard } from '@/components/RulesetIdentityCard';
 import { Screen } from '@/components/Screen';
+import { SystemHero } from '@/components/SystemHero';
+import { SystemPanel } from '@/components/SystemPanel';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useGameSystem } from '@/contexts/GameSystemContext';
 import { Colors, Spacing } from '@/constants/theme';
+import { getSystemPresentation } from '@/lib/systemPresentation';
 import { getHomeUpgradeCopy, getPlanSummaryCopy } from '@/lib/subscriptionUi';
 
 export default function HomeScreen() {
   const { isPro, savedProjectCount, loading } = useAppState();
+  const { activeSystem, activeSystemId, setActiveSystemId } = useGameSystem();
+  const presentation = getSystemPresentation(activeSystemId);
 
   const maxFreeSaves = 3;
   const homeUpgradeCopy = getHomeUpgradeCopy(maxFreeSaves);
@@ -32,30 +39,41 @@ export default function HomeScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.hero}>
-          <View style={styles.heroBadge}>
-            <Label style={styles.heroBadgeText}>RPG Toolkit</Label>
-          </View>
-
-          <Heading style={styles.heroTitle}>Forge campaigns, encounters, and legends.</Heading>
-
-          <BodyText style={styles.heroSubtitle}>
-            A fantasy toolkit for game masters and RPG designers. Shape progression, balance battles,
-            generate treasure, and spin quest hooks worthy of tavern songs.
-          </BodyText>
+        <SystemHero
+          systemId={activeSystemId}
+          eyebrow={presentation.posterLabel}
+          title={activeSystem.home.heroTitle}
+          body={activeSystem.home.heroSubtitle}
+          chips={[activeSystem.home.badge, ...presentation.heroTags]}
+        >
+          <GameSystemPicker
+            value={activeSystemId}
+            onChange={setActiveSystemId}
+            label="Toolkit Mode"
+            helperText="Choose the game frame first, then build prep that sounds and feels authored for that table."
+          />
 
           <View style={styles.heroActions}>
-            <Pressable style={styles.primaryButton} onPress={() => goTo('/xp')}>
-              <Label style={styles.primaryButtonText}>Begin Crafting</Label>
+            <Pressable
+              style={[styles.primaryButton, { backgroundColor: presentation.palette.accent }]}
+              onPress={() => goTo('/xp')}
+            >
+              <Label style={styles.primaryButtonText}>{activeSystem.home.primaryCta}</Label>
             </Pressable>
 
-            <Pressable style={styles.secondaryButton} onPress={() => goTo('/projects')}>
+            <Pressable
+              style={[
+                styles.secondaryButton,
+                { borderColor: presentation.palette.heroBorder, backgroundColor: presentation.palette.panelMuted },
+              ]}
+              onPress={() => goTo('/projects')}
+            >
               <Label>Open My Projects</Label>
             </Pressable>
           </View>
-        </View>
+        </SystemHero>
 
-        <Card>
+        <SystemPanel systemId={activeSystemId} tone="muted">
           <Label>Current Plan</Label>
           {loading ? (
             <BodyText>Checking your account status...</BodyText>
@@ -64,97 +82,98 @@ export default function HomeScreen() {
           ) : (
             <BodyText>{getPlanSummaryCopy(savedProjectCount, maxFreeSaves, false)}</BodyText>
           )}
-        </Card>
+        </SystemPanel>
+
+        <RulesetIdentityCard system={activeSystem} />
 
         <View style={styles.sectionHeader}>
-          <Heading style={styles.sectionTitle}>Toolkit Chambers</Heading>
-          <BodyText>Choose a tool and continue building your world.</BodyText>
+          <Heading style={styles.sectionTitle}>{activeSystem.home.sectionTitle}</Heading>
+          <BodyText>{activeSystem.home.sectionSubtitle}</BodyText>
         </View>
 
         <View style={styles.grid}>
           <Pressable onPress={() => goTo('/campaign')}>
-            <Card>
-              <Label>Campaign</Label>
-              <Heading style={styles.cardTitle}>Campaign Hub</Heading>
-              <BodyText>
-                Organize campaign identity, party focus, objectives, and session notes in one place.
-              </BodyText>
-            </Card>
+            <SystemPanel systemId={activeSystemId} tone="accent">
+              <Label>{activeSystem.home.campaign.label}</Label>
+              <Heading style={styles.cardTitle}>{activeSystem.home.campaign.title}</Heading>
+              <BodyText>{activeSystem.home.campaign.body}</BodyText>
+            </SystemPanel>
           </Pressable>
 
           <Pressable onPress={() => goTo('/xp')}>
-            <Card>
-              <Label>XP Calculator</Label>
-              <Heading style={styles.cardTitle}>Leveling Forge</Heading>
-              <BodyText>
-                Shape character progression and tune your experience curve for long campaigns.
-              </BodyText>
-            </Card>
+            <SystemPanel systemId={activeSystemId}>
+              <Label>{activeSystem.home.xp.label}</Label>
+              <Heading style={styles.cardTitle}>{activeSystem.home.xp.title}</Heading>
+              <BodyText>{activeSystem.home.xp.body}</BodyText>
+            </SystemPanel>
           </Pressable>
 
           <Pressable onPress={() => goTo('/encounters')}>
-            <Card>
-              <Label>Encounter</Label>
-              <Heading style={styles.cardTitle}>Battle Planner</Heading>
-              <BodyText>
-                Weigh danger, pressure, and boss-tier threats before the party enters combat.
-              </BodyText>
-            </Card>
+            <SystemPanel systemId={activeSystemId}>
+              <Label>{activeSystem.home.encounters.label}</Label>
+              <Heading style={styles.cardTitle}>{activeSystem.home.encounters.title}</Heading>
+              <BodyText>{activeSystem.home.encounters.body}</BodyText>
+            </SystemPanel>
           </Pressable>
 
           <Pressable onPress={() => goTo('/generator')}>
-            <Card>
-              <Label>Loot</Label>
-              <Heading style={styles.cardTitle}>Treasure Vault</Heading>
-              <BodyText>
-                Generate rewards, valuables, and item ideas fit for dungeons and fallen kings.
-              </BodyText>
-            </Card>
+            <SystemPanel systemId={activeSystemId}>
+              <Label>{activeSystem.home.generator.label}</Label>
+              <Heading style={styles.cardTitle}>{activeSystem.home.generator.title}</Heading>
+              <BodyText>{activeSystem.home.generator.body}</BodyText>
+            </SystemPanel>
           </Pressable>
 
           <Pressable onPress={() => goTo('/quest')}>
-            <Card>
-              <Label>Quest</Label>
-              <Heading style={styles.cardTitle}>Hook Generator</Heading>
-              <BodyText>
-                Spin faction intrigue, heroic objectives, and story complications in seconds.
-              </BodyText>
-            </Card>
+            <SystemPanel systemId={activeSystemId}>
+              <Label>{activeSystem.home.quest.label}</Label>
+              <Heading style={styles.cardTitle}>{activeSystem.home.quest.title}</Heading>
+              <BodyText>{activeSystem.home.quest.body}</BodyText>
+            </SystemPanel>
           </Pressable>
         </View>
 
         <Pressable onPress={() => goTo('/projects')}>
-          <Card>
-            <Label>My Projects</Label>
-            <Heading style={styles.cardTitle}>Archive of Scrolls</Heading>
-            <BodyText>
-              Open saved builds, rename them, duplicate them, and return to unfinished ideas.
-            </BodyText>
-          </Card>
+          <SystemPanel systemId={activeSystemId} tone="muted">
+            <Label>{activeSystem.home.projects.label}</Label>
+            <Heading style={styles.cardTitle}>{activeSystem.home.projects.title}</Heading>
+            <BodyText>{activeSystem.home.projects.body}</BodyText>
+          </SystemPanel>
         </Pressable>
 
         {!isPro ? (
           <Pressable onPress={() => goTo('/pricing')}>
-            <View style={styles.upgradeCard}>
+            <View
+              style={[
+                styles.upgradeCard,
+                {
+                  backgroundColor: presentation.palette.panelAccent,
+                  borderColor: presentation.palette.heroBorder,
+                },
+              ]}
+            >
               <Label style={styles.upgradeLabel}>{homeUpgradeCopy.label}</Label>
               <Heading style={styles.upgradeTitle}>{homeUpgradeCopy.title}</Heading>
               <BodyText style={styles.upgradeText}>
                 {homeUpgradeCopy.text}
               </BodyText>
 
-              <View style={styles.upgradeButton}>
+              <View
+                style={[
+                  styles.upgradeButton,
+                  { backgroundColor: presentation.palette.accent },
+                ]}
+              >
                 <Label style={styles.upgradeButtonText}>{homeUpgradeCopy.buttonLabel}</Label>
               </View>
             </View>
           </Pressable>
         ) : (
-          <Card>
+          <SystemPanel systemId={activeSystemId} tone="accent">
             <Label>Pro Status</Label>
-            <Heading style={styles.cardTitle}>Guildmaster Access</Heading>
-            <BodyText>
-              Your account has full access. Continue building without save limits.
-            </BodyText>
-          </Card>
+            <Heading style={styles.cardTitle}>{activeSystem.home.proTitle}</Heading>
+            <BodyText>{activeSystem.home.proBody}</BodyText>
+          </SystemPanel>
         )}
 
         <View style={styles.footer}>
@@ -175,43 +194,13 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     paddingBottom: Spacing.xl,
   },
-  hero: {
-    backgroundColor: Colors.elevated,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.lg,
-    gap: Spacing.md,
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
-  },
-  heroBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#6d28d9',
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  heroBadgeText: {
-    color: '#fff',
-  },
-  heroTitle: {
-    fontSize: 28,
-    lineHeight: 34,
-  },
-  heroSubtitle: {
-    fontSize: 15,
-    lineHeight: 22,
-  },
   heroActions: {
     flexDirection: 'row',
     gap: Spacing.sm,
     flexWrap: 'wrap',
   },
   primaryButton: {
-    backgroundColor: '#6d28d9',
+    backgroundColor: Colors.accent,
     borderRadius: 16,
     paddingVertical: 14,
     paddingHorizontal: 18,
@@ -249,33 +238,32 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   upgradeCard: {
-    backgroundColor: '#6d28d9',
+    borderWidth: 1,
     borderRadius: 24,
     padding: Spacing.lg,
     gap: Spacing.md,
   },
   upgradeLabel: {
-    color: '#fff',
+    color: Colors.text,
   },
   upgradeTitle: {
-    color: '#fff',
+    color: Colors.text,
     fontSize: 26,
     lineHeight: 32,
   },
   upgradeText: {
-    color: '#f3e8ff',
+    color: Colors.mutedText,
     fontSize: 15,
     lineHeight: 22,
   },
   upgradeButton: {
     alignSelf: 'flex-start',
-    backgroundColor: '#ffffff',
     borderRadius: 16,
     paddingVertical: 12,
     paddingHorizontal: 16,
   },
   upgradeButtonText: {
-    color: '#6d28d9',
+    color: '#fff',
   },
   footer: {
     alignItems: 'center',

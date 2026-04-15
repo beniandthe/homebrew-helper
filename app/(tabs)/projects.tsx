@@ -8,20 +8,31 @@ import { Screen } from '@/components/Screen';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useGameSystem } from '@/contexts/GameSystemContext';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import {
+  getProjectRoute,
+  getProjectSummary,
+  getProjectSystemId,
+  getProjectSystemLabel,
+  getProjectSystemShortLabel,
+  getProjectToolBadge,
+  getProjectToolLabel,
+  type ProjectData,
+} from '@/lib/projectPresentation';
 
 type SavedProject = {
   id: string;
   user_id: string;
   name: string;
   tool_type: string;
-  data: Record<string, unknown>;
+  data: ProjectData;
   created_at: string;
   updated_at: string;
   campaign_id?: string | null;
 };
 
-type ProjectFilter = 'all' | 'xp' | 'encounter' | 'loot' | 'quest';
+type ProjectFilter = 'all' | 'campaign' | 'xp' | 'encounter' | 'loot' | 'quest';
 
 function showMessage(title: string, message: string) {
   if (Platform.OS === 'web') {
@@ -42,6 +53,7 @@ export default function ProjectsScreen() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<ProjectFilter>('all');
   const { refreshAppState } = useAppState();
+  const { activeSystem } = useGameSystem();
   const [statusBanner, setStatusBanner] = useState<{
     title?: string;
     message: string;
@@ -88,6 +100,7 @@ export default function ProjectsScreen() {
     }
 
     const toolTypeMap: Record<Exclude<ProjectFilter, 'all'>, string> = {
+      campaign: 'campaign_hub',
       xp: 'xp_calculator',
       encounter: 'encounter_calculator',
       loot: 'loot_generator',
@@ -96,6 +109,36 @@ export default function ProjectsScreen() {
 
     return projects.filter((project) => project.tool_type === toolTypeMap[activeFilter]);
   }, [projects, activeFilter]);
+
+  const campaignNameById = useMemo(() => {
+    return new Map(
+      projects
+        .filter((project) => project.tool_type === 'campaign_hub')
+        .map((project) => [project.id, project.name] as const)
+    );
+  }, [projects]);
+
+  const archiveStats = useMemo(() => {
+    const linkedCount = projects.filter((project) => Boolean(project.campaign_id)).length;
+    const campaignCount = projects.filter((project) => project.tool_type === 'campaign_hub').length;
+    const systemCounts = new Map<string, number>();
+
+    projects.forEach((project) => {
+      const key = getProjectSystemShortLabel(project.data);
+      systemCounts.set(key, (systemCounts.get(key) ?? 0) + 1);
+    });
+
+    const systemBreakdown = Array.from(systemCounts.entries())
+      .map(([label, count]) => `${label} ${count}`)
+      .join(' • ');
+
+    return {
+      total: projects.length,
+      linkedCount,
+      campaignCount,
+      systemBreakdown: systemBreakdown || 'No saved rulesets yet.',
+    };
+  }, [projects]);
 
   const loadProjects = useCallback(async () => {
     if (!supabase || !userId) {
@@ -110,7 +153,6 @@ export default function ProjectsScreen() {
         .from('saved_projects')
         .select('*')
         .eq('user_id', userId)
-        .is('campaign_id', null)
         .order('updated_at', { ascending: false });
 
       if (error) {
@@ -245,13 +287,20 @@ export default function ProjectsScreen() {
     }
   }
 
+  const filterLabels: Record<ProjectFilter, string> = {
+    all: 'All',
+    campaign: activeSystem.tabs.campaign,
+    xp: activeSystem.tabs.xp,
+    encounter: activeSystem.tabs.encounters,
+    loot: activeSystem.tabs.generator,
+    quest: activeSystem.tabs.quest,
+  };
+
   return (
     <Screen>
       <Card>
-        <Heading>My Projects</Heading>
-        <BodyText>
-          View and manage saved calculator and generator projects.
-        </BodyText>
+        <Heading>{activeSystem.projects.title}</Heading>
+        <BodyText>{activeSystem.projects.description}</BodyText>
       </Card>
 
       {statusBanner ? (
@@ -268,11 +317,12 @@ export default function ProjectsScreen() {
         <View style={styles.filterRow}>
           {(
             [
-              { key: 'all', label: 'All' },
-              { key: 'xp', label: 'XP' },
-              { key: 'encounter', label: 'Encounter' },
-              { key: 'loot', label: 'Loot' },
-              { key: 'quest', label: 'Quest' },
+              { key: 'all', label: filterLabels.all },
+              { key: 'campaign', label: filterLabels.campaign },
+              { key: 'xp', label: filterLabels.xp },
+              { key: 'encounter', label: filterLabels.encounter },
+              { key: 'loot', label: filterLabels.loot },
+              { key: 'quest', label: filterLabels.quest },
             ] as { key: ProjectFilter; label: string }[]
           ).map((filter) => {
             const selected = activeFilter === filter.key;
@@ -291,6 +341,19 @@ export default function ProjectsScreen() {
           })}
         </View>
       </Card>
+
+      {!loadingSession && userId ? (
+        <Card>
+          <Label>Archive Snapshot</Label>
+          <View style={styles.resultRow}>
+            <BodyText>Total saved: {archiveStats.total}</BodyText>
+            <BodyText>{activeSystem.tabs.campaign} workspaces: {archiveStats.campaignCount}</BodyText>
+            <BodyText>Campaign-linked tools: {archiveStats.linkedCount}</BodyText>
+            <BodyText>Rulesets: {archiveStats.systemBreakdown}</BodyText>
+          </View>
+        </Card>
+      ) : null}
+
       {loadingSession ? (
         <Card>
           <View style={styles.row}>
@@ -313,120 +376,114 @@ export default function ProjectsScreen() {
             <RefreshControl refreshing={loadingProjects} onRefresh={loadProjects} />
           }
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
-            <Card>
-              <View style={styles.projectHeader}>
-                <Pressable
-                  style={styles.projectInfo}
-                  onPress={() => {
-                    if (renamingId === item.id) return;
+          renderItem={({ item }) => {
+            const projectSystemId = getProjectSystemId(item.data);
+            const toolLabel = getProjectToolLabel(item.tool_type, projectSystemId);
+            const toolBadge = getProjectToolBadge(item.tool_type, projectSystemId);
+            const systemShortLabel = getProjectSystemShortLabel(item.data);
+            const systemLabel = getProjectSystemLabel(item.data);
+            const projectSummary = getProjectSummary(item.tool_type, item.data);
+            const linkedCampaignName = item.campaign_id ? campaignNameById.get(item.campaign_id) : null;
 
-                    if (item.tool_type === 'campaign_hub') {
-                      router.push({
-                        pathname: '/campaign',
-                        params: { projectId: item.id },
-                      });
-                      return;
-                    }
+            return (
+              <Card>
+                <View style={styles.projectHeader}>
+                  <Pressable
+                    style={styles.projectInfo}
+                    onPress={() => {
+                      if (renamingId === item.id) return;
 
-                    if (item.tool_type === 'xp_calculator') {
-                      router.push({
-                        pathname: '/xp',
-                        params: { projectId: item.id },
-                      });
-                      return;
-                    }
+                      const pathname = getProjectRoute(item.tool_type);
 
-                    if (item.tool_type === 'encounter_calculator') {
-                      router.push({
-                        pathname: '/encounters',
-                        params: { projectId: item.id },
-                      });
-                      return;
-                    }
+                      if (pathname) {
+                        router.push({
+                          pathname,
+                          params: { projectId: item.id },
+                        });
+                        return;
+                      }
 
-                    if (item.tool_type === 'loot_generator') {
-                      router.push({
-                        pathname: '/generator',
-                        params: { projectId: item.id },
-                      });
-                      return;
-                    }
+                      showMessage('Not supported yet', 'That project type cannot be opened from the archive yet.');
+                    }}
+                  >
+                    {renamingId === item.id ? (
+                      <View style={styles.renameBlock}>
+                        <Label>Rename project</Label>
+                        <AppInput
+                          value={renameValue}
+                          onChangeText={setRenameValue}
+                          placeholder="Enter project name"
+                        />
+                        <View style={styles.actionRow}>
+                          <Pressable
+                            onPress={() => handleRename(item.id)}
+                            disabled={deletingId === item.id}
+                            style={[styles.renameButton, deletingId === item.id && styles.buttonDisabled]}
+                          >
+                            <Label style={styles.renameButtonText}>
+                              {deletingId === item.id ? 'Saving...' : 'Save Name'}
+                            </Label>
+                          </Pressable>
 
-                    if (item.tool_type === 'quest_generator') {
-                      router.push({
-                        pathname: '/quest',
-                        params: { projectId: item.id },
-                      });
-                      return;
-                    }
-
-                    showMessage('Not supported yet', 'Open/load is only wired for XP, Encounter, Loot, and Quest projects right now.');
-                  }}
-                >
-                  {renamingId === item.id ? (
-                    <View style={styles.renameBlock}>
-                      <Label>Rename project</Label>
-                      <AppInput
-                        value={renameValue}
-                        onChangeText={setRenameValue}
-                        placeholder="Enter project name"
-                      />
-                      <View style={styles.actionRow}>
-                        <Pressable
-                          onPress={() => handleRename(item.id)}
-                          disabled={deletingId === item.id}
-                          style={[styles.renameButton, deletingId === item.id && styles.buttonDisabled]}
-                        >
-                          <Label style={styles.renameButtonText}>
-                            {deletingId === item.id ? 'Saving...' : 'Save Name'}
-                          </Label>
-                        </Pressable>
-
-                        <Pressable
-                          onPress={() => {
-                            setRenamingId(null);
-                            setRenameValue('');
-                          }}
-                          style={styles.cancelButton}
-                        >
-                          <Label>Cancel</Label>
-                        </Pressable>
+                          <Pressable
+                            onPress={() => {
+                              setRenamingId(null);
+                              setRenameValue('');
+                            }}
+                            style={styles.cancelButton}
+                          >
+                            <Label>Cancel</Label>
+                          </Pressable>
+                        </View>
                       </View>
-                    </View>
-                  ) : (
+                    ) : (
                       <>
+                        <View style={styles.metaPillRow}>
+                          <View style={[styles.metaPill, styles.systemPill]}>
+                            <BodyText style={styles.metaPillText}>{systemShortLabel}</BodyText>
+                          </View>
+                          <View style={styles.metaPill}>
+                            <BodyText style={styles.metaPillText}>{toolBadge}</BodyText>
+                          </View>
+                        </View>
                         <Label>{item.name}</Label>
-                        <BodyText>{item.tool_type}</BodyText>
-                        {item.campaign_id ? <BodyText>Linked to campaign</BodyText> : null}
+                        <BodyText>{toolLabel}</BodyText>
+                        <BodyText>{projectSummary}</BodyText>
+                        <BodyText>Ruleset: {systemLabel}</BodyText>
+                        {linkedCampaignName ? (
+                          <BodyText>Campaign: {linkedCampaignName}</BodyText>
+                        ) : item.campaign_id ? (
+                          <BodyText>Campaign-linked project</BodyText>
+                        ) : null}
                         <BodyText>Updated: {formatDate(item.updated_at)}</BodyText>
                       </>
-                  )}
-                </Pressable>
+                    )}
+                  </Pressable>
 
-                {renamingId !== item.id ? (
-                  <View style={styles.sideActions}>
-                    <Pressable
-                      onPress={() => handleStartRename(item.id, item.name)}
-                      style={styles.editButton}
-                    >
-                      <Label>Edit</Label>
-                    </Pressable>
+                  {renamingId !== item.id ? (
+                    <View style={styles.sideActions}>
+                      <Pressable
+                        onPress={() => handleStartRename(item.id, item.name)}
+                        style={styles.editButton}
+                      >
+                        <Label>Edit</Label>
+                      </Pressable>
 
-                    <Pressable
-                      onPress={() => handleDelete(item.id)}
-                      disabled={deletingId === item.id}
-                      style={[styles.deleteButton, deletingId === item.id && styles.buttonDisabled]}
-                    >
-                      <Label style={styles.deleteButtonText}>
-                        {deletingId === item.id ? 'Working...' : 'Delete'}
-                      </Label>
-                    </Pressable>
-                  </View>
-                ) : null}
-              </View>
-            </Card>
-          )}
+                      <Pressable
+                        onPress={() => handleDelete(item.id)}
+                        disabled={deletingId === item.id}
+                        style={[styles.deleteButton, deletingId === item.id && styles.buttonDisabled]}
+                      >
+                        <Label style={styles.deleteButtonText}>
+                          {deletingId === item.id ? 'Working...' : 'Delete'}
+                        </Label>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </View>
+              </Card>
+            );
+          }}
           ListEmptyComponent={
             <Card>
               {loadingProjects ? (
@@ -440,7 +497,7 @@ export default function ProjectsScreen() {
                   <BodyText>
                     {activeFilter === 'all'
                       ? 'Save something from one of the toolkit screens, then come back here.'
-                      : `You do not have any ${activeFilter} projects yet.`}
+                      : `You do not have any ${filterLabels[activeFilter]} projects yet.`}
                   </BodyText>
                 </>
               )}
@@ -547,5 +604,27 @@ const styles = StyleSheet.create({
   },
   filterChipTextSelected: {
     color: '#fff',
+  },
+  resultRow: {
+    gap: 8,
+  },
+  metaPillRow: {
+    flexDirection: 'row',
+    gap: Spacing.xs,
+    flexWrap: 'wrap',
+  },
+  metaPill: {
+    backgroundColor: Colors.elevated,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  systemPill: {
+    borderColor: Colors.accent,
+  },
+  metaPillText: {
+    color: Colors.text,
   },
 });

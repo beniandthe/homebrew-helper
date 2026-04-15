@@ -4,6 +4,8 @@ import { Colors } from '@/constants/theme';
 import { Pressable } from 'react-native';
 import { Label } from '@/components/AppText';
 import { getHeaderPlanLabel } from '@/lib/subscriptionUi';
+import { useGameSystem } from '@/contexts/GameSystemContext';
+import { getSystemPresentation } from '@/lib/systemPresentation';
 
 function UpgradeHeaderButton() {
     return (
@@ -17,69 +19,77 @@ function UpgradeHeaderButton() {
 }
 
 export default function TabsLayout() {
+  const { activeSystem } = useGameSystem();
+  const presentation = getSystemPresentation(activeSystem.id);
+  const { palette } = presentation;
+
   return (
     <Tabs
       screenOptions={{
         headerRight: () => <UpgradeHeaderButton />,
-        headerStyle: { backgroundColor: Colors.card },
+        headerStyle: { backgroundColor: palette.headerBackground },
+        headerShadowVisible: false,
         headerTintColor: Colors.text,
-        tabBarStyle: { backgroundColor: Colors.card, borderTopColor: Colors.border },
-        tabBarActiveTintColor: Colors.text,
+        tabBarStyle: {
+          backgroundColor: palette.tabBackground,
+          borderTopColor: palette.headerBorder,
+        },
+        tabBarActiveTintColor: palette.accent,
         tabBarInactiveTintColor: Colors.mutedText,
-        sceneStyle: { backgroundColor: Colors.background },
+        sceneStyle: { backgroundColor: palette.pageTint },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
+          title: activeSystem.tabs.home,
           tabBarIcon: ({ color, size }) => <Ionicons name="sparkles-outline" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="campaign"
         options={{
-          title: 'Campaign',
+          title: activeSystem.tabs.campaign,
         }}
       />
       <Tabs.Screen
         name="xp"
         options={{
-          title: 'XP',
+          title: activeSystem.tabs.xp,
           tabBarIcon: ({ color, size }) => <Ionicons name="stats-chart-outline" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="encounters"
         options={{
-          title: 'Encounter',
+          title: activeSystem.tabs.encounters,
           tabBarIcon: ({ color, size }) => <Ionicons name="shield-outline" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="generator"
         options={{
-          title: 'Loot',
+          title: activeSystem.tabs.generator,
           tabBarIcon: ({ color, size }) => <Ionicons name="color-wand-outline" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="quest"
         options={{
-          title: 'Quest',
+          title: activeSystem.tabs.quest,
           tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="sword" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="projects"
         options={{
-          title: 'My Projects',
+          title: activeSystem.tabs.projects,
         }}
       />
       <Tabs.Screen
         name="account"
         options={{
-          title: 'Account',
+          title: activeSystem.tabs.account,
           tabBarIcon: ({ color, size }) => <Ionicons name="person-outline" color={color} size={size} />,
         }}
       />

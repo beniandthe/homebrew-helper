@@ -6,21 +6,61 @@ import { useAppState } from '@/contexts/AppStateContext';
 import { ProCard } from '@/components/ProCard';
 import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
-import { BodyText, Heading, Label } from '@/components/AppText';
-import { Card } from '@/components/Card';
+import { BodyText, Label } from '@/components/AppText';
 import { Screen } from '@/components/Screen';
+import { SystemHero } from '@/components/SystemHero';
+import { SystemPanel } from '@/components/SystemPanel';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { useGameSystem } from '@/contexts/GameSystemContext';
+import { buildDndCampaignLinkContext } from '@/lib/dndCampaignLinkContext';
 import { buildSeed, pickFromPool, pickManyFromPool } from '@/lib/generation';
-import { fetchCampaignOptions, fetchLatestSaveAccess, getErrorMessage } from '@/lib/projectAccess';
+import { getGameSystem, resolveGameSystemId, type GameSystemId } from '@/lib/gameSystems';
+import { getSystemPresentation } from '@/lib/systemPresentation';
+import {
+  applyCampaignSystemToPayload,
+  fetchCampaignOptionById,
+  fetchCampaignOptions,
+  fetchLatestSaveAccess,
+  getErrorMessage,
+  type CampaignOption,
+} from '@/lib/projectAccess';
+import {
+  getQuestSystemConfig,
+  type FactionImpact,
+  type QuestScope,
+  type QuestStructure,
+  type QuestTone,
+  type ResolutionStyle,
+} from '@/lib/questSystemConfig';
 import { getCampaignLinkUpsell, getFreeLimitUpsell } from '@/lib/subscriptionUi';
 
-type QuestTone = 'heroic' | 'grim' | 'mystic' | 'political';
-type QuestScope = 'personal' | 'local' | 'regional' | 'faction';
-type QuestStructure = 'one-shot' | 'three-part';
-type ResolutionStyle = 'combat' | 'diplomacy' | 'stealth' | 'choice-driven';
-type FactionImpact = 'minor' | 'moderate' | 'major';
+const QUEST_TONE_OPTIONS: QuestTone[] = ['heroic', 'grim', 'mystic', 'political'];
+const QUEST_SCOPE_OPTIONS: QuestScope[] = ['personal', 'local', 'regional', 'faction'];
+const QUEST_STRUCTURE_OPTIONS: QuestStructure[] = ['one-shot', 'three-part'];
+const RESOLUTION_STYLE_OPTIONS: ResolutionStyle[] = ['combat', 'diplomacy', 'stealth', 'choice-driven'];
+const FACTION_IMPACT_OPTIONS: FactionImpact[] = ['minor', 'moderate', 'major'];
+
+function isQuestTone(value: unknown): value is QuestTone {
+  return typeof value === 'string' && QUEST_TONE_OPTIONS.includes(value as QuestTone);
+}
+
+function isQuestScope(value: unknown): value is QuestScope {
+  return typeof value === 'string' && QUEST_SCOPE_OPTIONS.includes(value as QuestScope);
+}
+
+function isQuestStructure(value: unknown): value is QuestStructure {
+  return typeof value === 'string' && QUEST_STRUCTURE_OPTIONS.includes(value as QuestStructure);
+}
+
+function isResolutionStyle(value: unknown): value is ResolutionStyle {
+  return typeof value === 'string' && RESOLUTION_STYLE_OPTIONS.includes(value as ResolutionStyle);
+}
+
+function isFactionImpact(value: unknown): value is FactionImpact {
+  return typeof value === 'string' && FACTION_IMPACT_OPTIONS.includes(value as FactionImpact);
+}
 
 type QuestProjectData = {
     factionName?: string;
@@ -31,54 +71,65 @@ type QuestProjectData = {
     resolutionStyle?: ResolutionStyle;
     factionImpact?: FactionImpact;
     questNotes?: string;
-};
-
-type CampaignOption = {
-    id: string;
-    name: string;
+    systemId?: GameSystemId;
+    systemName?: string;
 };
 
 export default function QuestScreen() {
-    const params = useLocalSearchParams<{ projectId?: string }>();
+  const params = useLocalSearchParams<{ projectId?: string }>();
+  const { activeSystemId, setActiveSystemId } = useGameSystem();
+  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [lockedCampaignSystemId, setLockedCampaignSystemId] = useState<GameSystemId | null>(null);
+  const selectedCampaign = useMemo(
+    () => campaignOptions.find((campaign) => campaign.id === selectedCampaignId) ?? null,
+    [campaignOptions, selectedCampaignId]
+  );
+  const effectiveSystemId = lockedCampaignSystemId ?? activeSystemId;
+  const effectiveSystem = useMemo(() => getGameSystem(effectiveSystemId), [effectiveSystemId]);
+  const questConfig = useMemo(() => getQuestSystemConfig(effectiveSystemId), [effectiveSystemId]);
+  const palette = useMemo(() => getSystemPresentation(effectiveSystemId).palette, [effectiveSystemId]);
+  const dndCampaignContext = useMemo(
+    () => (effectiveSystemId === 'dnd5e' ? buildDndCampaignLinkContext(selectedCampaign?.data) : null),
+    [effectiveSystemId, selectedCampaign?.data]
+  );
 
-    const [factionName, setFactionName] = useState('Crimson Pact');
-    const [objectiveSeed, setObjectiveSeed] = useState('Recover a stolen relic');
-    const [tone, setTone] = useState<QuestTone>('heroic');
-    const [scope, setScope] = useState<QuestScope>('local');
-    const [structure, setStructure] = useState<QuestStructure>('one-shot');
-    const [resolutionStyle, setResolutionStyle] = useState<ResolutionStyle>('choice-driven');
-    const [factionImpact, setFactionImpact] = useState<FactionImpact>('moderate');
-    const [questNotes, setQuestNotes] = useState('');
-    const [variationSeed, setVariationSeed] = useState(0);
+  const [factionName, setFactionName] = useState(questConfig.defaults.factionName);
+  const [objectiveSeed, setObjectiveSeed] = useState(questConfig.defaults.objectiveSeed);
+  const [tone, setTone] = useState<QuestTone>(questConfig.defaults.tone);
+  const [scope, setScope] = useState<QuestScope>(questConfig.defaults.scope);
+  const [structure, setStructure] = useState<QuestStructure>(questConfig.defaults.structure);
+  const [resolutionStyle, setResolutionStyle] = useState<ResolutionStyle>(questConfig.defaults.resolutionStyle);
+  const [factionImpact, setFactionImpact] = useState<FactionImpact>(questConfig.defaults.factionImpact);
+  const [questNotes, setQuestNotes] = useState('');
+  const [variationSeed, setVariationSeed] = useState(0);
+  const [appliedCampaignDefaultsId, setAppliedCampaignDefaultsId] = useState('');
 
-    const [loadingProject, setLoadingProject] = useState(false);
-    const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
-    const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-    const [saving, setSaving] = useState(false);
+  const [loadingProject, setLoadingProject] = useState(false);
+  const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-    const {
-        userId: sessionUserId,
-        isPro,
-        savedProjectCount,
-        loading: loadingSession,
-        refreshAppState,
-    } = useAppState();
+  const {
+    userId: sessionUserId,
+    isPro,
+    savedProjectCount,
+    loading: loadingSession,
+    refreshAppState,
+  } = useAppState();
 
-    const [statusBanner, setStatusBanner] = useState<{
-        title?: string;
-        message: string;
-        variant: StatusBannerVariant;
-    } | null>(null);
+  const [statusBanner, setStatusBanner] = useState<{
+    title?: string;
+    message: string;
+    variant: StatusBannerVariant;
+  } | null>(null);
 
-    const maxFreeSaves = 3;
-    const isAtFreeLimit = !isPro && savedProjectCount >= maxFreeSaves;
-    const isCreatingNewProject = !currentProjectId;
-    const freeLimitUpsell = getFreeLimitUpsell(maxFreeSaves);
-    const campaignLinkUpsell = getCampaignLinkUpsell('This quest');
-
-    const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
-    const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
-    const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const maxFreeSaves = 3;
+  const isAtFreeLimit = !isPro && savedProjectCount >= maxFreeSaves;
+  const isCreatingNewProject = !currentProjectId;
+  const freeLimitUpsell = getFreeLimitUpsell(maxFreeSaves);
+  const campaignLinkUpsell = getCampaignLinkUpsell('This quest');
 
     function setBanner(
         variant: StatusBannerVariant,
@@ -129,6 +180,71 @@ export default function QuestScreen() {
     }, [isPro]);
 
     useEffect(() => {
+        if (params.projectId || currentProjectId) {
+            return;
+        }
+
+        setFactionName(questConfig.defaults.factionName);
+        setObjectiveSeed(questConfig.defaults.objectiveSeed);
+        setTone(questConfig.defaults.tone);
+        setScope(questConfig.defaults.scope);
+        setStructure(questConfig.defaults.structure);
+        setResolutionStyle(questConfig.defaults.resolutionStyle);
+        setFactionImpact(questConfig.defaults.factionImpact);
+        setQuestNotes('');
+        setVariationSeed(0);
+        setAppliedCampaignDefaultsId('');
+    }, [questConfig, params.projectId, currentProjectId]);
+
+    useEffect(() => {
+        if (!selectedCampaignId) {
+            setAppliedCampaignDefaultsId('');
+            return;
+        }
+
+        if (effectiveSystemId !== 'dnd5e' || !dndCampaignContext) {
+            return;
+        }
+
+        if (params.projectId || currentProjectId || appliedCampaignDefaultsId === selectedCampaignId) {
+            return;
+        }
+
+        if (dndCampaignContext.mainFaction) {
+            setFactionName(dndCampaignContext.mainFaction);
+        }
+
+        if (dndCampaignContext.defaultQuestSeed) {
+            setObjectiveSeed(dndCampaignContext.defaultQuestSeed);
+        }
+
+        if (questNotes.trim().length === 0) {
+            const seededNotes = [
+                dndCampaignContext.currentObjective
+                    ? `Current campaign objective: ${dndCampaignContext.currentObjective}.`
+                    : null,
+                dndCampaignContext.npcSummaryLines[0] ? `Primary NPC lead: ${dndCampaignContext.npcSummaryLines[0]}.` : null,
+            ]
+                .filter(Boolean)
+                .join(' ');
+
+            if (seededNotes) {
+                setQuestNotes(seededNotes);
+            }
+        }
+
+        setAppliedCampaignDefaultsId(selectedCampaignId);
+    }, [
+        appliedCampaignDefaultsId,
+        currentProjectId,
+        dndCampaignContext,
+        effectiveSystemId,
+        params.projectId,
+        questNotes,
+        selectedCampaignId,
+    ]);
+
+    useEffect(() => {
         async function loadProject() {
             if (!supabase) return;
             if (!sessionUserId) return;
@@ -137,6 +253,7 @@ export default function QuestScreen() {
                 setLoadedProjectName(null);
                 setCurrentProjectId(null);
                 setSelectedCampaignId('');
+                setLockedCampaignSystemId(null);
                 return;
             }
 
@@ -156,11 +273,21 @@ export default function QuestScreen() {
                 }
 
                 const projectData = (data?.data ?? {}) as QuestProjectData;
+                let linkedCampaign: CampaignOption | null = null;
 
                 if (typeof data?.campaign_id === 'string' && isPro) {
                     setSelectedCampaignId(data.campaign_id);
+                    linkedCampaign = await fetchCampaignOptionById(supabase, sessionUserId, data.campaign_id);
                 } else {
                     setSelectedCampaignId('');
+                    setLockedCampaignSystemId(null);
+                }
+
+                if (linkedCampaign) {
+                    setLockedCampaignSystemId(linkedCampaign.systemId);
+                    setActiveSystemId(linkedCampaign.systemId);
+                } else if (projectData.systemId || projectData.systemName) {
+                    setActiveSystemId(resolveGameSystemId(projectData.systemId ?? projectData.systemName));
                 }
 
                 if (typeof projectData.factionName === 'string') {
@@ -171,42 +298,23 @@ export default function QuestScreen() {
                     setObjectiveSeed(projectData.objectiveSeed);
                 }
 
-                if (
-                    projectData.tone === 'heroic' ||
-                    projectData.tone === 'grim' ||
-                    projectData.tone === 'mystic' ||
-                    projectData.tone === 'political'
-                ) {
+                if (isQuestTone(projectData.tone)) {
                     setTone(projectData.tone);
                 }
 
-                if (
-                    projectData.scope === 'personal' ||
-                    projectData.scope === 'local' ||
-                    projectData.scope === 'regional' ||
-                    projectData.scope === 'faction'
-                ) {
+                if (isQuestScope(projectData.scope)) {
                     setScope(projectData.scope);
                 }
 
-                if (projectData.structure === 'one-shot' || projectData.structure === 'three-part') {
+                if (isQuestStructure(projectData.structure)) {
                     setStructure(projectData.structure);
                 }
 
-                if (
-                    projectData.resolutionStyle === 'combat' ||
-                    projectData.resolutionStyle === 'diplomacy' ||
-                    projectData.resolutionStyle === 'stealth' ||
-                    projectData.resolutionStyle === 'choice-driven'
-                ) {
+                if (isResolutionStyle(projectData.resolutionStyle)) {
                     setResolutionStyle(projectData.resolutionStyle);
                 }
 
-                if (
-                    projectData.factionImpact === 'minor' ||
-                    projectData.factionImpact === 'moderate' ||
-                    projectData.factionImpact === 'major'
-                ) {
+                if (isFactionImpact(projectData.factionImpact)) {
                     setFactionImpact(projectData.factionImpact);
                 }
 
@@ -222,208 +330,38 @@ export default function QuestScreen() {
         }
 
         loadProject();
-    }, [params.projectId, sessionUserId, isPro]);
+    }, [params.projectId, sessionUserId, isPro, setActiveSystemId]);
 
     const result = useMemo(() => {
-        const toneHooks: Record<QuestTone, string> = {
-            heroic: 'A plea for help offers a chance to protect people from rising danger.',
-            grim: 'A simple mission reveals betrayal, sacrifice, and consequences with no clean answer.',
-            mystic: 'Ancient powers stir beneath the surface, twisting motives and reality alike.',
-            political: 'Every step alters alliances, leverage, and who gets to control the story next.',
-        };
-
-        const scopeHooks: Record<QuestScope, string> = {
-            personal: 'The central conflict revolves around one person, companion, rival, or bloodline.',
-            local: 'The fate of a town, district, outpost, or shrine depends on the outcome.',
-            regional: 'Roads, settlements, and multiple powers across the region are affected.',
-            faction: 'The mission may change how a faction survives, grows, or fractures.',
-        };
-
-        const twists: Record<QuestTone, string[]> = {
-            heroic: [
-                'The presumed victim willingly disappeared to protect someone else.',
-                'The enemy is trying to stop a worse threat from emerging.',
-                'Success requires saving both the target and the supposed villain.',
-                'A celebrated hero fabricated evidence to force action.',
-                'The “monster” is the last guardian of an endangered settlement.',
-                'The patron’s true request is mercy, not vengeance.',
-            ],
-            grim: [
-                'The reward is funded by an atrocity the patron hopes you never learn.',
-                'The missing person caused the disaster and is hiding it.',
-                'Victory demands sacrificing an ally, reputation, or future resource.',
-                'A trusted contact has been coerced and now works against the party.',
-                'The mission succeeds only if one district is abandoned to its fate.',
-                'The guilty party is already dead; the cover-up is still alive.',
-            ],
-            mystic: [
-                'The relic is sentient and has chosen the wrong bearer.',
-                'The location exists in two states at once and the party must choose one.',
-                'An omen reveals the patron has been guided by a false divine sign.',
-                'Each use of magic rewrites one remembered detail of the mission.',
-                'A celestial and infernal witness both claim jurisdiction over the objective.',
-                'The quest target is a living seal that cannot be moved safely.',
-            ],
-            political: [
-                'The public reason for the mission is a cover for a power reshuffle.',
-                'A rival faction wants the same outcome, but for opposite reasons.',
-                'Evidence exists that could collapse a treaty if exposed.',
-                'The mission contract has conflicting clauses written by different sponsors.',
-                'A neutral guild can end the conflict but demands a public scapegoat.',
-                'Winning quietly strengthens a tyrant; winning loudly starts a rebellion.',
-            ],
-        };
-
-        const complications: Record<ResolutionStyle, string[]> = {
-            combat: [
-                'The objective is protected by a force stronger than expected.',
-                'The battlefield shifts midway, splitting the party or changing lines of attack.',
-                'Defeating the enemy quickly risks destroying the very thing the party came to recover.',
-                'The enemy commander can call a duel that pauses lesser combatants.',
-                'The arena has rotating hazards that activate every other round.',
-                'Killing the leader ends the fight but voids key intelligence.',
-            ],
-            diplomacy: [
-                'The opposing side will negotiate, but only if a painful truth is admitted first.',
-                'An ally undermines talks by pushing for vengeance.',
-                'The party must convince two enemies at once, each with incompatible demands.',
-                'A witness can settle the dispute but will only testify in private.',
-                'A deadline forces a ceasefire decision before all evidence is gathered.',
-                'Both sides agree to talks, but each sends a different secret demand.',
-            ],
-            stealth: [
-                'The target location has layered watch rotations and magical detection.',
-                'An informant provides an entry point, but their loyalty is questionable.',
-                'Remaining unseen becomes harder once the objective is moved unexpectedly.',
-                'The party must choose between silent progress and rescuing prisoners.',
-                'A false alarm elsewhere creates an opening that closes quickly.',
-                'The extraction route is trapped and only partially mapped.',
-            ],
-            'choice-driven': [
-                'Every path forward saves one group while exposing another to danger.',
-                'A secret changes who truly deserves the reward or blame.',
-                'The easiest solution strengthens the wrong faction long term.',
-                'A rival offers help that guarantees success but creates a future debt.',
-                'The best tactical choice conflicts with the party’s stated values.',
-                'A promised reward can only be claimed by betraying an ally.',
-            ],
-        };
-
-        const rewardsByImpact: Record<FactionImpact, string[]> = {
-            minor: [
-                'temporary goodwill with a local contact',
-                'modest pay and a useful rumor',
-                'safe access to a small restricted area',
-                'priority support from a neighborhood militia',
-                'discounted supplies from local merchants',
-            ],
-            moderate: [
-                'faction influence and a named ally',
-                'a rare cache of resources or equipment',
-                'political leverage over a recurring NPC or group',
-                'formal writs granting travel and operating authority',
-                'an oath-bound specialist assigned for one future mission',
-            ],
-            major: [
-                'control of a strategic route, asset, or stronghold',
-                'a powerful relic or binding oath from a major figure',
-                'lasting faction realignment in the campaign world',
-                'long-term command over a regional logistics network',
-                'a permanent seat at a ruling council or war table',
-            ],
-        };
-
-        const consequencesByImpact: Record<FactionImpact, string[]> = {
-            minor: [
-                'a neighborhood or outpost changes hands quietly',
-                'a trusted NPC loses standing',
-                'future prices or access shift slightly',
-                'local rumors distort the party’s role in the outcome',
-                'a minor rival begins actively undermining the party',
-            ],
-            moderate: [
-                'a faction gains or loses public legitimacy',
-                'regional patrols, laws, or recruitment begin to shift',
-                'an allied group becomes dependent on the party’s choices',
-                'smuggling routes open or close based on the party’s decision',
-                'neutral towns demand formal guarantees before cooperation',
-            ],
-            major: [
-                'war accelerates or a truce becomes possible',
-                'a major faction fractures internally',
-                'the campaign map changes in a visible and lasting way',
-                'a successor power emerges and rewrites standing alliances',
-                'refugee flows reshape economies and military priorities',
-            ],
-        };
-
-        const altResolution: Record<ResolutionStyle, string> = {
-            combat: 'A direct assault is possible, but a quieter solution could preserve allies and intelligence.',
-            diplomacy: 'Talks can work, but pressure, leverage, or a show of force may still be needed.',
-            stealth: 'A covert route exists, but discovery could transform the mission into open conflict.',
-            'choice-driven': 'There is no perfect route; the “best” ending depends on who the party chooses to protect.',
-        };
-
         const seedValue = buildSeed(
             `${factionName}|${objectiveSeed}|${tone}|${scope}|${structure}|${resolutionStyle}|${factionImpact}|${questNotes}|${variationSeed}`
         );
 
-        const twist = pickFromPool(twists[tone], seedValue, 5);
-        const complication = pickFromPool(complications[resolutionStyle], seedValue, 11);
-        const reward = pickFromPool(rewardsByImpact[factionImpact], seedValue, 17);
-        const consequence = pickFromPool(consequencesByImpact[factionImpact], seedValue, 23);
-
-        const hook = `${toneHooks[tone]} ${scopeHooks[scope]}`;
-        const objective = `${factionName} needs someone to ${objectiveSeed.toLowerCase()}.`;
-
-        const factionPressure =
-            factionImpact === 'minor'
-                ? 'This quest affects local standing and immediate trust.'
-                : factionImpact === 'moderate'
-                    ? 'This quest could noticeably shift faction leverage.'
-                    : 'This quest can reshape campaign-level faction power.';
-
-        const questArc =
-            structure === 'one-shot'
-                ? [
-                    'Act 1: The party receives the hook and learns what is truly at stake.',
-                    'Act 2: The complication forces a harder route than expected.',
-                    'Act 3: The twist reframes the ending and the consequence lands immediately.',
-                ]
-                : [
-                    'Part 1: Initial mission and false understanding of the conflict.',
-                    'Part 2: The complication grows, revealing new enemies, motives, or divided loyalties.',
-                    'Part 3: The twist forces a final choice that determines the lasting consequence.',
-                ];
-
         return {
-            hook,
-            objective,
-            complication,
-            twist,
-            reward,
-            consequence,
-            alternateResolution: altResolution[resolutionStyle],
-            factionPressure,
-            questArc,
-            sceneIdeas: pickManyFromPool(
-                [
-                    'An NPC ally asks for a side favor that complicates timing.',
-                    'A neutral party offers assistance in exchange for a future debt.',
-                    'Evidence appears that reframes who initiated the conflict.',
-                    'A countdown event forces the party to split their priorities.',
-                    'A moral witness observes the party and later reports on their actions.',
-                    'A secondary objective can secure a stronger ending if completed in time.',
-                    'A trusted map is outdated because borders changed since it was made.',
-                    'A celebration scene hides a covert exchange relevant to the main quest.',
-                    'A wounded enemy offers a bargain that reveals hidden command structure.',
-                    'The party finds proof that an earlier side quest was connected all along.',
-                ],
-                2,
-                seedValue + 31
-            ),
+            hook: `${questConfig.toneHooks[tone]} ${questConfig.scopeHooks[scope]}`,
+            objective: questConfig.objectiveTemplate(factionName, objectiveSeed),
+            siteFrame: pickFromPool(questConfig.siteFrames[scope], seedValue, 37),
+            complication: pickFromPool(questConfig.complications[resolutionStyle], seedValue, 11),
+            twist: pickFromPool(questConfig.twists[tone], seedValue, 5),
+            reward: pickFromPool(questConfig.rewardsByImpact[factionImpact], seedValue, 17),
+            consequence: pickFromPool(questConfig.consequencesByImpact[factionImpact], seedValue, 23),
+            alternateResolution: questConfig.altResolution[resolutionStyle],
+            factionPressure: questConfig.factionPressure[factionImpact],
+            questArc: questConfig.questArc[structure],
+            sceneIdeas: pickManyFromPool(questConfig.sceneIdeas, 2, seedValue + 31),
         };
-    }, [factionName, objectiveSeed, tone, scope, structure, resolutionStyle, factionImpact, questNotes, variationSeed]);
+    }, [
+        factionName,
+        objectiveSeed,
+        tone,
+        scope,
+        structure,
+        resolutionStyle,
+        factionImpact,
+        questNotes,
+        variationSeed,
+        questConfig,
+    ]);
 
     function buildPayload() {
         return {
@@ -435,6 +373,8 @@ export default function QuestScreen() {
             resolutionStyle,
             factionImpact,
             questNotes,
+            systemId: effectiveSystemId,
+            systemName: effectiveSystem.label,
             variationSeed,
             result,
         };
@@ -454,8 +394,9 @@ export default function QuestScreen() {
         try {
             setSaving(true);
 
-            const payload = buildPayload();
+            const payload = applyCampaignSystemToPayload(buildPayload(), selectedCampaign);
             const timestampName = `Quest - ${new Date().toLocaleString()}`;
+            const campaignMessage = selectedCampaign ? ` in ${selectedCampaign.name}` : '';
 
             if (!asNew && currentProjectId) {
                 const { error } = await supabase
@@ -464,7 +405,7 @@ export default function QuestScreen() {
                         name: loadedProjectName ?? timestampName,
                         data: payload,
                         updated_at: new Date().toISOString(),
-                        campaign_id: null,
+                        campaign_id: selectedCampaignId || null,
                     })
                     .eq('id', currentProjectId)
                     .eq('user_id', sessionUserId);
@@ -475,8 +416,7 @@ export default function QuestScreen() {
                 }
 
                 await refreshAppState();
-                setSelectedCampaignId('');
-                setBanner('success', 'Updated', 'Your quest project was updated successfully.');
+                setBanner('success', 'Updated', `Your quest project was updated successfully${campaignMessage}.`);
                 return;
             }
 
@@ -497,7 +437,7 @@ export default function QuestScreen() {
                     name: timestampName,
                     tool_type: 'quest_generator',
                     data: payload,
-                    campaign_id: null,
+                    campaign_id: selectedCampaignId || null,
                 })
                 .select()
                 .single();
@@ -509,10 +449,9 @@ export default function QuestScreen() {
 
             setLoadedProjectName(data?.name ?? timestampName);
             setCurrentProjectId(data?.id ?? null);
-            setSelectedCampaignId('');
             await refreshAppState();
 
-            setBanner('success', 'Saved', 'Your quest project was saved successfully.');
+            setBanner('success', 'Saved', `Your quest project was saved successfully${campaignMessage}.`);
         } finally {
             setSaving(false);
         }
@@ -546,7 +485,7 @@ export default function QuestScreen() {
         try {
             setSaving(true);
 
-            const payload = buildPayload();
+            const payload = applyCampaignSystemToPayload(buildPayload(), selectedCampaign);
             const timestampName = loadedProjectName ?? `Quest - ${new Date().toLocaleString()}`;
 
             if (currentProjectId) {
@@ -600,12 +539,29 @@ export default function QuestScreen() {
 
     return (
         <Screen>
-            <Card>
-                <Heading>Quest Builder</Heading>
-                <BodyText>
-                    Build practical quest structure with hooks, twists, consequences, alternate resolutions, and faction pressure.
-                </BodyText>
-            </Card>
+            <SystemHero
+                systemId={effectiveSystemId}
+                eyebrow={effectiveSystem.shortLabel}
+                title={effectiveSystem.quest.title}
+                body={effectiveSystem.quest.description}
+                chips={[
+                    questConfig.toneLabels[tone],
+                    questConfig.scopeLabels[scope],
+                    dndCampaignContext
+                        ? dndCampaignContext.npcRoster.length > 0
+                            ? `${dndCampaignContext.npcRoster.length} NPC leads`
+                            : questConfig.resolutionLabels[resolutionStyle]
+                        : questConfig.resolutionLabels[resolutionStyle],
+                    selectedCampaign ? `Campaign: ${selectedCampaign.name}` : 'Standalone adventure',
+                ]}
+            >
+                {loadedProjectName ? (
+                    <View style={styles.heroMetaRow}>
+                        <Label style={styles.heroMetaLabel}>Loaded project</Label>
+                        <BodyText>{loadedProjectName}</BodyText>
+                    </View>
+                ) : null}
+            </SystemHero>
 
             {statusBanner ? (
                 <StatusBanner
@@ -624,48 +580,36 @@ export default function QuestScreen() {
             />
 
             {loadingProject ? (
-                <Card>
+                <SystemPanel systemId={effectiveSystemId} tone="muted">
                     <View style={styles.sessionRow}>
                         <ActivityIndicator />
                         <BodyText>Loading saved project...</BodyText>
                     </View>
-                </Card>
+                </SystemPanel>
             ) : loadedProjectName ? (
-                <Card>
+                <SystemPanel systemId={effectiveSystemId} tone="muted">
                     <Label>Loaded project</Label>
                     <BodyText>{loadedProjectName}</BodyText>
-                </Card>
+                </SystemPanel>
             ) : null}
 
-            <Card>
+            <SystemPanel systemId={effectiveSystemId} tone="accent">
                 <Label>Campaign Link</Label>
 
                 {!isPro ? (
                     <View style={styles.proLockedBlock}>
-                        <View style={styles.proLockedHeader}>
-                            <Label style={styles.proLockedTitle}>★ {campaignLinkUpsell.lockedTitle}</Label>
-                            <BodyText style={styles.proLockedText}>
-                                {campaignLinkUpsell.lockedMessage}
-                            </BodyText>
-                        </View>
+                <View style={styles.proLockedHeader}>
+                    <Label style={styles.proLockedTitle}>★ {campaignLinkUpsell.lockedTitle}</Label>
+                    <BodyText style={styles.proLockedText}>
+                        {campaignLinkUpsell.lockedMessage}
+                    </BodyText>
+                </View>
 
-                        <View style={styles.lockedPillRow}>
-                            <View style={[styles.pill, styles.lockedPill]}>
-                                <BodyText style={styles.lockedPillText}>none</BodyText>
-                            </View>
-                            <View style={[styles.pill, styles.lockedPill]}>
-                                <BodyText style={styles.lockedPillText}>Campaign Alpha</BodyText>
-                            </View>
-                            <View style={[styles.pill, styles.lockedPill]}>
-                                <BodyText style={styles.lockedPillText}>Boss Arc</BodyText>
-                            </View>
-                        </View>
+                <BodyText style={styles.proLockedHint}>
+                    {campaignLinkUpsell.message}
+                </BodyText>
 
-                        <BodyText style={styles.proLockedHint}>
-                            {campaignLinkUpsell.message}
-                        </BodyText>
-
-                        <Pressable onPress={handleUpgradePress} style={styles.inlineUpgradeButton}>
+                        <Pressable onPress={handleUpgradePress} style={[styles.inlineUpgradeButton, { backgroundColor: palette.accent }]}>
                             <Label style={styles.inlineUpgradeButtonText}>{campaignLinkUpsell.buttonLabel}</Label>
                         </Pressable>
                     </View>
@@ -677,8 +621,11 @@ export default function QuestScreen() {
                 ) : campaignOptions.length > 0 ? (
                     <View style={styles.pillRow}>
                         <Pressable
-                            onPress={() => setSelectedCampaignId('')}
-                            style={[styles.pill, selectedCampaignId === '' && styles.pillSelected]}
+                            onPress={() => {
+                                setSelectedCampaignId('');
+                                setLockedCampaignSystemId(null);
+                            }}
+                            style={[styles.pill, selectedCampaignId === '' && { backgroundColor: palette.accent, borderColor: palette.accent }]}
                         >
                             <BodyText style={selectedCampaignId === '' ? styles.pillTextSelected : undefined}>
                                 none
@@ -691,11 +638,15 @@ export default function QuestScreen() {
                             return (
                                 <Pressable
                                     key={campaign.id}
-                                    onPress={() => setSelectedCampaignId(campaign.id)}
-                                    style={[styles.pill, selected && styles.pillSelected]}
+                                    onPress={() => {
+                                        setSelectedCampaignId(campaign.id);
+                                        setLockedCampaignSystemId(campaign.systemId);
+                                        setActiveSystemId(campaign.systemId);
+                                    }}
+                                    style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
                                 >
                                     <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                                        {campaign.name}
+                                        {campaign.name} • {campaign.systemShortLabel}
                                     </BodyText>
                                 </Pressable>
                             );
@@ -705,124 +656,139 @@ export default function QuestScreen() {
                     <BodyText>No saved campaigns yet. Create one in Campaign Hub to link this project.</BodyText>
                 )}
 
-                <Label>Faction Name</Label>
+                {selectedCampaign ? (
+                    <BodyText>Ruleset locked to {selectedCampaign.systemName} while linked to {selectedCampaign.name}.</BodyText>
+                ) : null}
+
+                {dndCampaignContext ? (
+                    <View style={styles.resultRow}>
+                        <BodyText>
+                            Patron lens: {dndCampaignContext.mainFaction || 'No patron set'}.
+                        </BodyText>
+                        {dndCampaignContext.currentObjective ? (
+                            <BodyText>Campaign objective feeding this quest: {dndCampaignContext.currentObjective}</BodyText>
+                        ) : null}
+                    </View>
+                ) : null}
+
+                <Label>{questConfig.labels.factionName}</Label>
                 <AppInput
                     value={factionName}
                     onChangeText={setFactionName}
-                    placeholder="Crimson Pact"
+                    placeholder={questConfig.defaults.factionName}
                 />
 
-                <Label>Objective Seed</Label>
+                <Label>{questConfig.labels.objectiveSeed}</Label>
                 <AppInput
                     value={objectiveSeed}
                     onChangeText={setObjectiveSeed}
-                    placeholder="Recover a stolen relic"
+                    placeholder={questConfig.defaults.objectiveSeed}
                 />
 
-                <Label>Tone</Label>
+                <Label>{questConfig.labels.tone}</Label>
                 <View style={styles.pillRow}>
-                    {(['heroic', 'grim', 'mystic', 'political'] as QuestTone[]).map((option) => {
+                    {QUEST_TONE_OPTIONS.map((option) => {
                         const selected = tone === option;
 
                         return (
                             <Pressable
                                 key={option}
                                 onPress={() => setTone(option)}
-                                style={[styles.pill, selected && styles.pillSelected]}
+                                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
                             >
                                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                                    {option}
+                                    {questConfig.toneLabels[option]}
                                 </BodyText>
                             </Pressable>
                         );
                     })}
                 </View>
 
-                <Label>Scope</Label>
+                <Label>{questConfig.labels.scope}</Label>
                 <View style={styles.pillRow}>
-                    {(['personal', 'local', 'regional', 'faction'] as QuestScope[]).map((option) => {
+                    {QUEST_SCOPE_OPTIONS.map((option) => {
                         const selected = scope === option;
 
                         return (
                             <Pressable
                                 key={option}
                                 onPress={() => setScope(option)}
-                                style={[styles.pill, selected && styles.pillSelected]}
+                                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
                             >
                                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                                    {option}
+                                    {questConfig.scopeLabels[option]}
                                 </BodyText>
                             </Pressable>
                         );
                     })}
                 </View>
 
-                <Label>Quest Structure</Label>
+                <Label>{questConfig.labels.structure}</Label>
                 <View style={styles.pillRow}>
-                    {(['one-shot', 'three-part'] as QuestStructure[]).map((option) => {
+                    {QUEST_STRUCTURE_OPTIONS.map((option) => {
                         const selected = structure === option;
 
                         return (
                             <Pressable
                                 key={option}
                                 onPress={() => setStructure(option)}
-                                style={[styles.pill, selected && styles.pillSelected]}
+                                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
                             >
                                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                                    {option}
+                                    {questConfig.structureLabels[option]}
                                 </BodyText>
                             </Pressable>
                         );
                     })}
                 </View>
 
-                <Label>Primary Resolution Style</Label>
+                <Label>{questConfig.labels.resolutionStyle}</Label>
                 <View style={styles.pillRow}>
-                    {(['combat', 'diplomacy', 'stealth', 'choice-driven'] as ResolutionStyle[]).map((option) => {
+                    {RESOLUTION_STYLE_OPTIONS.map((option) => {
                         const selected = resolutionStyle === option;
 
                         return (
                             <Pressable
                                 key={option}
                                 onPress={() => setResolutionStyle(option)}
-                                style={[styles.pill, selected && styles.pillSelected]}
+                                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
                             >
                                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                                    {option}
+                                    {questConfig.resolutionLabels[option]}
                                 </BodyText>
                             </Pressable>
                         );
                     })}
                 </View>
 
-                <Label>Faction Impact</Label>
+                <Label>{questConfig.labels.factionImpact}</Label>
                 <View style={styles.pillRow}>
-                    {(['minor', 'moderate', 'major'] as FactionImpact[]).map((option) => {
+                    {FACTION_IMPACT_OPTIONS.map((option) => {
                         const selected = factionImpact === option;
 
                         return (
                             <Pressable
                                 key={option}
                                 onPress={() => setFactionImpact(option)}
-                                style={[styles.pill, selected && styles.pillSelected]}
+                                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
                             >
                                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                                    {option}
+                                    {questConfig.impactLabels[option]}
                                 </BodyText>
                             </Pressable>
                         );
                     })}
                 </View>
 
-                <Label>Prep Notes</Label>
+                <Label>{questConfig.labels.notes}</Label>
                 <AppInput
                     value={questNotes}
                     onChangeText={setQuestNotes}
-                    placeholder="Important NPC, reveal in act 2, clue hidden in chapel, consequence if players refuse..."
+                    placeholder={questConfig.labels.notesPlaceholder}
                     multiline
                 />
                 <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
-                    <Label style={styles.secondaryButtonText}>Reroll Quest Beats</Label>
+                    <Label style={styles.secondaryButtonText}>{questConfig.labels.rerollButton}</Label>
                 </Pressable>
 
                 <View style={styles.saveRow}>
@@ -830,10 +796,22 @@ export default function QuestScreen() {
                         <Pressable
                             onPress={() => handleSaveProject(false)}
                             disabled={saving || loadingSession}
-                            style={[styles.saveButton, (saving || loadingSession) && styles.saveButtonDisabled]}
+                            style={[
+                                styles.saveButton,
+                                { backgroundColor: palette.accent },
+                                (saving || loadingSession) && styles.saveButtonDisabled,
+                            ]}
                         >
                             <Label style={styles.saveButtonText}>
-                                {saving ? 'Saving...' : currentProjectId ? 'Update Project' : 'Save Project'}
+                                {saving
+                                    ? 'Saving...'
+                                    : currentProjectId
+                                        ? selectedCampaignId
+                                            ? 'Update Linked Project'
+                                            : 'Update Project'
+                                        : selectedCampaignId
+                                            ? 'Save to Campaign'
+                                            : 'Save Project'}
                             </Label>
                         </Pressable>
 
@@ -850,15 +828,16 @@ export default function QuestScreen() {
                             disabled={saving || loadingSession || !isPro || !selectedCampaignId}
                             style={[
                                 styles.campaignButton,
+                                { borderColor: palette.accent },
                                 (saving || loadingSession || !isPro || !selectedCampaignId) && styles.saveButtonDisabled,
                             ]}
                         >
                             <Label style={styles.campaignButtonText}>
                                 {!isPro
-                                    ? 'Add to Campaign'
+                                    ? 'Link to Campaign'
                                     : currentProjectId && selectedCampaignId
-                                        ? 'Update Campaign'
-                                        : 'Add to Campaign'}
+                                        ? 'Relink Campaign'
+                                        : 'Link to Campaign'}
                             </Label>
                         </Pressable>
                     </View>
@@ -871,8 +850,10 @@ export default function QuestScreen() {
                     ) : sessionUserId ? (
                         <BodyText>
                             {currentProjectId
-                                ? 'Loaded project detected. You can update it, save a new copy, or add it to a campaign.'
-                                : 'Signed in. Saving is enabled.'}
+                                ? 'Loaded project detected. Save respects the selected campaign automatically, or save a new copy.'
+                                : selectedCampaignId
+                                    ? 'Signed in. Save Project will use the selected campaign by default.'
+                                    : 'Signed in. Saving is enabled.'}
                         </BodyText>
                     ) : (
                         <BodyText>Not signed in. You can generate quests, but not save yet.</BodyText>
@@ -887,51 +868,77 @@ export default function QuestScreen() {
                         />
                     ) : null}
                 </View>
-            </Card>
+            </SystemPanel>
 
-            <Card>
-                <Label>Quest Hook</Label>
+            {dndCampaignContext ? (
+                <SystemPanel systemId={effectiveSystemId}>
+                    <Label>Campaign Hooks</Label>
+                    <View style={styles.resultRow}>
+                        {dndCampaignContext.partyHookLines.length > 0 ? (
+                            dndCampaignContext.partyHookLines.slice(0, 4).map((entry, index) => (
+                                <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+                            ))
+                        ) : (
+                            <BodyText>No party hooks are logged in the linked campaign yet.</BodyText>
+                        )}
+                        {dndCampaignContext.npcSummaryLines.length > 0 ? (
+                            dndCampaignContext.npcSummaryLines.slice(0, 3).map((entry, index) => (
+                                <BodyText key={`npc-${entry}-${index}`}>• {entry}</BodyText>
+                            ))
+                        ) : (
+                            <BodyText>No NPC web is logged in the linked campaign yet.</BodyText>
+                        )}
+                    </View>
+                </SystemPanel>
+            ) : null}
+
+            <SystemPanel systemId={effectiveSystemId}>
+                <Label>{questConfig.labels.hook}</Label>
                 <View style={styles.resultRow}>
                     <BodyText>{result.hook}</BodyText>
                     <BodyText>{result.objective}</BodyText>
+                    <BodyText>{questConfig.labels.siteFrame}: {result.siteFrame}</BodyText>
+                    {dndCampaignContext?.campaignSummary ? (
+                        <BodyText>Campaign frame: {dndCampaignContext.campaignSummary}</BodyText>
+                    ) : null}
                 </View>
-            </Card>
+            </SystemPanel>
 
-            <Card>
-                <Label>Complication & Twist</Label>
+            <SystemPanel systemId={effectiveSystemId}>
+                <Label>{questConfig.labels.complication}</Label>
                 <View style={styles.resultRow}>
-                    <BodyText>Complication: {result.complication}</BodyText>
-                    <BodyText>Twist: {result.twist}</BodyText>
-                    <BodyText>Alternate Resolution: {result.alternateResolution}</BodyText>
+                    <BodyText>{questConfig.labels.complication}: {result.complication}</BodyText>
+                    <BodyText>{questConfig.labels.twistLead}: {result.twist}</BodyText>
+                    <BodyText>{questConfig.labels.alternateResolutionLead}: {result.alternateResolution}</BodyText>
                 </View>
-            </Card>
+            </SystemPanel>
 
-            <Card>
-                <Label>Reward & Consequence</Label>
+            <SystemPanel systemId={effectiveSystemId}>
+                <Label>{questConfig.labels.reward}</Label>
                 <View style={styles.resultRow}>
-                    <BodyText>Reward: {result.reward}</BodyText>
-                    <BodyText>Consequence: {result.consequence}</BodyText>
-                    <BodyText>Faction Pressure: {result.factionPressure}</BodyText>
+                    <BodyText>{questConfig.labels.rewardLead}: {result.reward}</BodyText>
+                    <BodyText>{questConfig.labels.consequenceLead}: {result.consequence}</BodyText>
+                    <BodyText>{questConfig.labels.factionPressureLead}: {result.factionPressure}</BodyText>
                 </View>
-            </Card>
+            </SystemPanel>
 
-            <Card>
-                <Label>{structure === 'one-shot' ? 'Quest Flow' : 'Quest Arc'}</Label>
+            <SystemPanel systemId={effectiveSystemId}>
+                <Label>{questConfig.labels.arc}</Label>
                 <View style={styles.resultRow}>
                     {result.questArc.map((entry, index) => (
                         <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
                     ))}
                 </View>
-            </Card>
+            </SystemPanel>
 
-            <Card>
-                <Label>Scene Ideas</Label>
+            <SystemPanel systemId={effectiveSystemId}>
+                <Label>{questConfig.labels.sceneIdeas}</Label>
                 <View style={styles.resultRow}>
                     {result.sceneIdeas.map((entry, index) => (
                         <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
                     ))}
                 </View>
-            </Card>
+            </SystemPanel>
         </Screen>
     );
 }
@@ -941,6 +948,13 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         gap: Spacing.sm,
         flexWrap: 'wrap',
+    },
+    heroMetaRow: {
+        gap: 4,
+        paddingTop: Spacing.xs,
+    },
+    heroMetaLabel: {
+        color: Colors.text,
     },
     pill: {
         backgroundColor: Colors.elevated,

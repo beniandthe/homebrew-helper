@@ -6,21 +6,51 @@ import { useAppState } from '@/contexts/AppStateContext';
 import { ProCard } from '@/components/ProCard';
 import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
-import { BodyText, Heading, Label } from '@/components/AppText';
-import { Card } from '@/components/Card';
+import { BodyText, Label } from '@/components/AppText';
 import { Screen } from '@/components/Screen';
+import { SystemHero } from '@/components/SystemHero';
+import { SystemPanel } from '@/components/SystemPanel';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { useGameSystem } from '@/contexts/GameSystemContext';
+import {
+  buildDndCampaignLinkContext,
+  getDndRewardRecipientCandidates,
+  getDndRewardRecipientSuggestions,
+} from '@/lib/dndCampaignLinkContext';
+import {
+  syncDndCampaignInventoryItem,
+  syncDndTreasureLedgerEntry,
+  syncDndTreasuryAwardEntry,
+  type DndTreasureLedgerEntry,
+} from '@/lib/dndCampaignLedger';
+import { type DndInventoryItem } from '@/lib/dnd5eCampaignKit';
 import { buildSeed, pickFromPool, pickManyFromPool } from '@/lib/generation';
-import { fetchCampaignOptions, fetchLatestSaveAccess, getErrorMessage } from '@/lib/projectAccess';
+import { getGameSystem, resolveGameSystemId, type GameSystemId } from '@/lib/gameSystems';
+import { getSystemPresentation } from '@/lib/systemPresentation';
+import {
+  applyCampaignSystemToPayload,
+  fetchCampaignOptionById,
+  fetchCampaignOptions,
+  fetchLatestSaveAccess,
+  getErrorMessage,
+  type CampaignOption,
+} from '@/lib/projectAccess';
+import {
+  buildRewardDetail,
+  buildRewardName,
+  getBundleStyleMultiplier,
+  getLootRarityMultiplier,
+  getRewardSourceMultiplier,
+  getRewardSystemConfig,
+  type BundleStyle,
+  type LootRarity,
+  type RewardSource,
+  type RewardTheme,
+  type RewardType,
+} from '@/lib/systemTooling';
 import { getCampaignLinkUpsell, getFreeLimitUpsell } from '@/lib/subscriptionUi';
-
-type LootRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
-type RewardType = 'gear' | 'gold' | 'consumable' | 'material';
-type RewardSource = 'boss' | 'chest' | 'quest' | 'vendor' | 'faction';
-type RewardTheme = 'arcane' | 'divine' | 'cursed' | 'martial' | 'wilderness' | 'noble';
-type BundleStyle = 'lean' | 'balanced' | 'generous';
 
 type LootProjectData = {
   playerLevel?: number;
@@ -31,30 +61,79 @@ type LootProjectData = {
   rewardTheme?: RewardTheme;
   bundleStyle?: BundleStyle;
   prepNotes?: string;
+  promotionHolder?: string;
+  systemId?: GameSystemId;
+  systemName?: string;
 };
 
-type CampaignOption = {
-  id: string;
-  name: string;
-};
+function getPromotedRewardCategory(rewardType: RewardType, itemName: string) {
+  const normalized = itemName.trim().toLowerCase();
 
+  if (rewardType === 'consumable' || normalized.includes('potion') || normalized.includes('scroll')) {
+    return 'Consumable';
+  }
+
+  if (rewardType === 'material') {
+    return 'Crafting material';
+  }
+
+  if (rewardType === 'gold') {
+    return 'Treasure';
+  }
+
+  return 'Magic item';
+}
+
+function getPromotedRewardAttunement(rewardType: RewardType, rarity: LootRarity, itemName: string) {
+  const normalized = itemName.trim().toLowerCase();
+
+  if (rewardType === 'consumable' || normalized.includes('potion') || normalized.includes('scroll')) {
+    return 'No';
+  }
+
+  if (rewardType === 'gear' && (rarity === 'rare' || rarity === 'epic' || rarity === 'legendary')) {
+    return 'Review';
+  }
+
+  return 'No';
+}
 
 export default function LootScreen() {
   const params = useLocalSearchParams<{ projectId?: string }>();
+  const { activeSystemId, setActiveSystemId } = useGameSystem();
+  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [lockedCampaignSystemId, setLockedCampaignSystemId] = useState<GameSystemId | null>(null);
+  const selectedCampaign = useMemo(
+    () => campaignOptions.find((campaign) => campaign.id === selectedCampaignId) ?? null,
+    [campaignOptions, selectedCampaignId]
+  );
+  const effectiveSystemId = lockedCampaignSystemId ?? activeSystemId;
+  const effectiveSystem = useMemo(() => getGameSystem(effectiveSystemId), [effectiveSystemId]);
+  const rewardConfig = useMemo(() => getRewardSystemConfig(effectiveSystemId), [effectiveSystemId]);
+  const palette = useMemo(() => getSystemPresentation(effectiveSystemId).palette, [effectiveSystemId]);
+  const dndCampaignContext = useMemo(
+    () => (effectiveSystemId === 'dnd5e' ? buildDndCampaignLinkContext(selectedCampaign?.data) : null),
+    [effectiveSystemId, selectedCampaign?.data]
+  );
 
-  const [playerLevel, setPlayerLevel] = useState('5');
-  const [enemyTier, setEnemyTier] = useState('1');
-  const [rewardType, setRewardType] = useState<RewardType>('gear');
-  const [rarity, setRarity] = useState<LootRarity>('common');
-  const [rewardSource, setRewardSource] = useState<RewardSource>('chest');
-  const [rewardTheme, setRewardTheme] = useState<RewardTheme>('martial');
-  const [bundleStyle, setBundleStyle] = useState<BundleStyle>('balanced');
+  const [playerLevel, setPlayerLevel] = useState(rewardConfig.defaults.playerLevel);
+  const [enemyTier, setEnemyTier] = useState(rewardConfig.defaults.enemyTier);
+  const [rewardType, setRewardType] = useState<RewardType>(rewardConfig.defaults.rewardType);
+  const [rarity, setRarity] = useState<LootRarity>(rewardConfig.defaults.rarity);
+  const [rewardSource, setRewardSource] = useState<RewardSource>(rewardConfig.defaults.rewardSource);
+  const [rewardTheme, setRewardTheme] = useState<RewardTheme>(rewardConfig.defaults.rewardTheme);
+  const [bundleStyle, setBundleStyle] = useState<BundleStyle>(rewardConfig.defaults.bundleStyle);
   const [prepNotes, setPrepNotes] = useState('');
+  const [promotionHolder, setPromotionHolder] = useState('Shared');
   const [variationSeed, setVariationSeed] = useState(0);
+  const [appliedCampaignDefaultsId, setAppliedCampaignDefaultsId] = useState('');
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [promotingReward, setPromotingReward] = useState<'featured' | 'bonus' | 'currency' | null>(null);
 
   const {
     userId: sessionUserId,
@@ -75,10 +154,6 @@ export default function LootScreen() {
   const isCreatingNewProject = !currentProjectId;
   const freeLimitUpsell = getFreeLimitUpsell(maxFreeSaves);
   const campaignLinkUpsell = getCampaignLinkUpsell('This reward setup');
-
-  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
-  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
 
   function setBanner(
     variant: StatusBannerVariant,
@@ -113,6 +188,30 @@ export default function LootScreen() {
     }
   }, [sessionUserId]);
 
+  const refreshSelectedCampaignData = useCallback(async () => {
+    if (!supabase || !sessionUserId || !selectedCampaignId) {
+      return;
+    }
+
+    try {
+      const refreshed = await fetchCampaignOptionById(supabase, sessionUserId, selectedCampaignId);
+      if (!refreshed) {
+        return;
+      }
+
+      setCampaignOptions((current) => {
+        const existing = current.find((campaign) => campaign.id === refreshed.id);
+        if (!existing) {
+          return [refreshed, ...current];
+        }
+
+        return current.map((campaign) => (campaign.id === refreshed.id ? refreshed : campaign));
+      });
+    } catch {
+      // Keep the generator responsive even if the campaign refresh misses.
+    }
+  }, [selectedCampaignId, sessionUserId]);
+
   useEffect(() => {
     if (isPro) {
       loadCampaignOptions();
@@ -129,6 +228,63 @@ export default function LootScreen() {
   }, [isPro]);
 
   useEffect(() => {
+    if (params.projectId || currentProjectId) {
+      return;
+    }
+
+    setPlayerLevel(rewardConfig.defaults.playerLevel);
+    setEnemyTier(rewardConfig.defaults.enemyTier);
+    setRewardType(rewardConfig.defaults.rewardType);
+    setRarity(rewardConfig.defaults.rarity);
+    setRewardSource(rewardConfig.defaults.rewardSource);
+    setRewardTheme(rewardConfig.defaults.rewardTheme);
+    setBundleStyle(rewardConfig.defaults.bundleStyle);
+    setPrepNotes('');
+    setPromotionHolder('Shared');
+    setVariationSeed(0);
+    setAppliedCampaignDefaultsId('');
+  }, [rewardConfig, params.projectId, currentProjectId]);
+
+  useEffect(() => {
+    if (!selectedCampaignId) {
+      setAppliedCampaignDefaultsId('');
+      return;
+    }
+
+    if (effectiveSystemId !== 'dnd5e' || !dndCampaignContext) {
+      return;
+    }
+
+    if (params.projectId || currentProjectId || appliedCampaignDefaultsId === selectedCampaignId) {
+      return;
+    }
+
+    if (dndCampaignContext.averageLevel) {
+      setPlayerLevel(String(dndCampaignContext.averageLevel));
+    }
+
+    if (prepNotes.trim().length === 0 && dndCampaignContext.defaultTreasureNote) {
+      setPrepNotes(dndCampaignContext.defaultTreasureNote);
+    }
+
+    if (promotionHolder.trim().length === 0 || promotionHolder === 'Shared') {
+      setPromotionHolder(getDndRewardRecipientCandidates(dndCampaignContext, rewardTheme)[0]?.name ?? 'Shared');
+    }
+
+    setAppliedCampaignDefaultsId(selectedCampaignId);
+  }, [
+    appliedCampaignDefaultsId,
+    currentProjectId,
+    dndCampaignContext,
+    effectiveSystemId,
+    params.projectId,
+    prepNotes,
+    promotionHolder,
+    rewardTheme,
+    selectedCampaignId,
+  ]);
+
+  useEffect(() => {
     async function loadProject() {
       if (!supabase) return;
       if (!sessionUserId) return;
@@ -137,6 +293,7 @@ export default function LootScreen() {
         setLoadedProjectName(null);
         setCurrentProjectId(null);
         setSelectedCampaignId('');
+        setLockedCampaignSystemId(null);
         return;
       }
 
@@ -156,11 +313,21 @@ export default function LootScreen() {
         }
 
         const projectData = (data?.data ?? {}) as LootProjectData;
+        let linkedCampaign: CampaignOption | null = null;
 
         if (typeof data?.campaign_id === 'string' && isPro) {
           setSelectedCampaignId(data.campaign_id);
+          linkedCampaign = await fetchCampaignOptionById(supabase, sessionUserId, data.campaign_id);
         } else {
           setSelectedCampaignId('');
+          setLockedCampaignSystemId(null);
+        }
+
+        if (linkedCampaign) {
+          setLockedCampaignSystemId(linkedCampaign.systemId);
+          setActiveSystemId(linkedCampaign.systemId);
+        } else if (projectData.systemId || projectData.systemName) {
+          setActiveSystemId(resolveGameSystemId(projectData.systemId ?? projectData.systemName));
         }
 
         if (typeof projectData.playerLevel === 'number') {
@@ -223,6 +390,10 @@ export default function LootScreen() {
           setPrepNotes(projectData.prepNotes);
         }
 
+        if (typeof projectData.promotionHolder === 'string') {
+          setPromotionHolder(projectData.promotionHolder);
+        }
+
         setLoadedProjectName(data?.name ?? 'Loaded project');
         setCurrentProjectId(data?.id ?? null);
       } finally {
@@ -231,101 +402,19 @@ export default function LootScreen() {
     }
 
     loadProject();
-  }, [params.projectId, sessionUserId, isPro]);
+  }, [params.projectId, sessionUserId, isPro, setActiveSystemId]);
 
   const result = useMemo(() => {
     const parsedPlayerLevel = Math.max(1, Number.parseInt(playerLevel || '1', 10));
     const parsedEnemyTier = Math.max(1, Number.parseInt(enemyTier || '1', 10));
 
-    const rarityMultiplier =
-      rarity === 'common'
-        ? 1
-        : rarity === 'uncommon'
-          ? 1.25
-          : rarity === 'rare'
-            ? 1.6
-            : rarity === 'epic'
-              ? 2.15
-              : 3.1;
-
-    const sourceMultiplier =
-      rewardSource === 'boss'
-        ? 1.4
-        : rewardSource === 'chest'
-          ? 1.15
-          : rewardSource === 'quest'
-            ? 1.25
-            : rewardSource === 'vendor'
-              ? 0.95
-              : 1.2;
-
-    const bundleMultiplier =
-      bundleStyle === 'lean'
-        ? 0.85
-        : bundleStyle === 'balanced'
-          ? 1
-          : 1.25;
+    const rarityMultiplier = getLootRarityMultiplier(rarity);
+    const sourceMultiplier = getRewardSourceMultiplier(rewardSource);
+    const bundleMultiplier = getBundleStyleMultiplier(bundleStyle);
 
     const baseGold = parsedPlayerLevel * parsedEnemyTier * 12;
     const goldAmount = Math.round(baseGold * rarityMultiplier * sourceMultiplier * bundleMultiplier);
 
-    const themedItems: Record<RewardTheme, Record<RewardType, string[]>> = {
-      arcane: {
-        gear: ['Runed Focus', 'Spellthread Cloak', 'Sigil Rod', 'Aether Band', 'Moonglass Dagger', 'Chrono Filigree Gloves', 'Glyphbound Lantern', 'Astral Chain Sash'],
-        gold: ['Mage Stipend', 'Sealed Coin Tube', 'Arcane Treasury Token', 'Guild Payout', 'Star Mint Scrip', 'Leyline Credit Chit', 'Tower Research Grant', 'Conclave Retainer Purse'],
-        consumable: ['Mana Tonic', 'Blink Dust', 'Scroll of Sparks', 'Elixir of Clarity', 'Ward Oil', 'Phasing Philter', 'Counterspell Capsule', 'Focus Draught'],
-        material: ['Aether Crystal', 'Spellglass Shard', 'Runic Ink', 'Leyroot Fiber', 'Moonstone Dust', 'Planar Brass', 'Prismatic Sand', 'Echo Sigil Plate'],
-      },
-      divine: {
-        gear: ['Blessed Shield', 'Sunmetal Charm', 'Saint’s Cloak', 'Votive Blade', 'Halo Pendant', 'Choirsteel Helm', 'Reliquary Bracers', 'Oathwoven Tabard'],
-        gold: ['Temple Tithe', 'Pilgrim Offering', 'Consecrated Coin Roll', 'Relic Fund', 'Blessed Purse', 'Cathedral Endowment', 'Shrine Stipend', 'Monastic Treasury Script'],
-        consumable: ['Healing Draught', 'Holy Water Flask', 'Incense Bundle', 'Prayer Candle Kit', 'Purity Tonic', 'Mercy Serum', 'Sunburst Vial', 'Sanctuary Capsule'],
-        material: ['Silver Filament', 'Blessed Resin', 'Sanctified Ash', 'Dawn Petal', 'Halo Sand', 'Seraph Glass', 'Sungold Leaf', 'Votive Wax'],
-      },
-      cursed: {
-        gear: ['Hexbound Ring', 'Blood-etched Knife', 'Wailing Locket', 'Shadowmail', 'Marked Bow', 'Widowbrand Chain', 'Penance Mask', 'Eclipsed Handaxe'],
-        gold: ['Black Coin Pouch', 'Forbidden Tribute', 'Grave Mint Coins', 'Night Tax Chest', 'Sin Ledger Voucher', 'Debt Collector Writ', 'Raven Toll Purse', 'Exile Bounty Token'],
-        consumable: ['Rot Flask', 'Nightshade Tonic', 'Ash Smoke Bomb', 'Curse Ink Vial', 'Bone Elixir', 'Doom Draught', 'Warding Blight Balm', 'Hexbreaker Capsule'],
-        material: ['Witchbone Dust', 'Rot Resin', 'Shade Thread', 'Black Salt', 'Grave Wax', 'Ebon Amber', 'Fate Ash', 'Mourning Iron'],
-      },
-      martial: {
-        gear: ['Iron Blade', 'Hunter Bow', 'Runed Shield', 'Traveler Armor', 'Moon Dagger', 'Siegebreaker Maul', 'Vanguard Spear', 'Skirmisher Buckler'],
-        gold: ['Mercenary Purse', 'War Chest Coins', 'Captain’s Payout', 'Field Bounty', 'Supply Voucher', 'Quartermaster Ration Scrip', 'Warlord Bonus Purse', 'Veteran Severance Roll'],
-        consumable: ['Battle Tonic', 'Fire Flask', 'Sharpening Oil', 'Smoke Bomb', 'Stamina Draught', 'Adrenaline Vial', 'Fortify Draft', 'Second Wind Salve'],
-        material: ['Iron Ore', 'Hardened Leather', 'Weapon Resin', 'Steel Rivets', 'Arrow Fletching', 'Tempered Steel Ingot', 'Siege Twine Bundle', 'Reinforced Plate Straps'],
-      },
-      wilderness: {
-        gear: ['Thorn Knife', 'Ranger Hood', 'Bone Charm', 'Mosscloak', 'Trail Bow', 'Rootbound Axe', 'Skywatch Cloak', 'Tanglehook Whip'],
-        gold: ['Ranger Cache', 'Hunter’s Purse', 'Frontier Scrip', 'Camp Payout', 'Forest Trade Coin', 'Pathfinder Wages', 'Druidic Trade Vouchers', 'Wildland Permit Tokens'],
-        consumable: ['Antidote Kit', 'Healing Herb Pack', 'Beast Lure', 'Trail Ration Bundle', 'Camouflage Paste', 'Scent Mask Oil', 'Predator Ward Salve', 'Stormleaf Tea'],
-        material: ['Ancient Bark', 'Beast Pelt', 'Green Resin', 'Feather Bundle', 'Spirit Herb', 'Wyvern Tendon', 'Verdant Ore', 'Star Moss Bundle'],
-      },
-      noble: {
-        gear: ['Signet Rapier', 'Velvet Mantle', 'House Brooch', 'Court Dagger', 'Gilded Buckler', 'Duelist Caneblade', 'Regent Mail Veil', 'Embassy Cloakpin'],
-        gold: ['Estate Purse', 'Court Reward', 'Tax Ledger Coin', 'Patron’s Gift', 'Silkbound Pouch', 'Council Honorarium', 'Trade House Dividend', 'Royal Charter Writ'],
-        consumable: ['Perfumed Tonic', 'Courtly Elixir', 'Fine Oil Flask', 'Banquet Reserve', 'Luxury Remedy', 'Composure Serum', 'Etiquette Draught', 'Imperial Antitoxin'],
-        material: ['Silk Thread', 'Gold Leaf', 'Fine Leather', 'Pearl Dust', 'Polished Lacquer', 'Star Sapphire Chips', 'Embossed Silver Plate', 'Royal Wax Seal Kit'],
-      },
-    };
-
-    const itemDetailLibrary: Record<string, { description: string; statLine: string }> = {
-      'Runed Focus': { description: 'An etched focus that hums when hostile magic is near.', statLine: '+1 spell attack rolls; once/long rest advantage on Arcana.' },
-      'Blessed Shield': { description: 'Sun-marked shield carried by temple wardens.', statLine: '+1 AC; once/day reduce radiant or necrotic damage by 1d8.' },
-      'Hexbound Ring': { description: 'A ring that stores one resolved curse for study.', statLine: 'Advantage on one curse-related save per long rest.' },
-      'Iron Blade': { description: 'Balanced war blade forged for relentless field use.', statLine: '+1 to hit; +2 damage vs. armored targets.' },
-      'Thorn Knife': { description: 'A serrated knife favored by scouts and skirmishers.', statLine: 'Bleed for 1 damage/round (2 rounds) on critical hit.' },
-      'Signet Rapier': { description: 'A noble dueling weapon with concealed house mark.', statLine: '+1 initiative; +1d4 damage when dueling a single foe.' },
-    };
-
-    const flavorNotes: Record<RewardSource, string> = {
-      boss: 'Boss rewards should feel memorable and include at least one standout element.',
-      chest: 'Chest rewards should feel discoverable and satisfying without overshadowing milestone rewards.',
-      quest: 'Quest rewards should reflect story effort, faction trust, or completion significance.',
-      vendor: 'Vendor rewards should be practical and priced like curated stock, not dramatic treasure spikes.',
-      faction: 'Faction rewards should reinforce identity, loyalty, and world politics.',
-    };
-
-    const itemPool = themedItems[rewardTheme][rewardType];
     const seed = buildSeed(
       [
         parsedPlayerLevel,
@@ -340,65 +429,93 @@ export default function LootScreen() {
       ].join('|')
     );
 
-    const itemName = pickFromPool(itemPool, seed, 3);
-
-    const bonusPool =
-      bundleStyle === 'lean'
-        ? ['small currency bonus', 'one practical extra consumable', 'minor crafting add-on']
-        : bundleStyle === 'balanced'
-          ? ['supplemental crafting materials', 'backup consumable pack', 'small secondary item']
-          : ['bonus rare material bundle', 'secondary themed item', 'extra coin cache'];
-
-    const bonusItem = pickFromPool(bonusPool, seed, 11);
+    const itemName = buildRewardName(rewardConfig, rewardTheme, rewardType, seed);
+    const bonusItem = pickFromPool(rewardConfig.bonusPools[bundleStyle], seed, 11);
 
     const practicalAdvice: string[] = [];
 
     if (rewardSource === 'boss') {
-      practicalAdvice.push('Boss rewards feel best when at least one item changes future player choices.');
+      practicalAdvice.push(rewardConfig.advice.boss);
     }
     if (rewardType === 'gold' && rarity !== 'common') {
-      practicalAdvice.push('High-rarity pure gold can feel flat. Consider pairing it with one named item or hook.');
+      practicalAdvice.push(rewardConfig.advice.rareGold);
     }
     if (rewardType === 'material') {
-      practicalAdvice.push('Material rewards are stronger when tied to crafting, upgrades, or a known NPC artisan.');
+      practicalAdvice.push(rewardConfig.advice.material);
     }
     if (rewardSource === 'vendor') {
-      practicalAdvice.push('Vendor rewards should stay useful and dependable rather than wildly swingy.');
+      practicalAdvice.push(rewardConfig.advice.vendor);
     }
     if (bundleStyle === 'generous') {
-      practicalAdvice.push('Generous bundles are best used for bosses, milestone quests, or major world progress.');
+      practicalAdvice.push(rewardConfig.advice.generous);
     }
     if (practicalAdvice.length === 0) {
-      practicalAdvice.push('This reward bundle is broadly usable as-is for a typical session reward.');
+      practicalAdvice.push(rewardConfig.advice.default);
     }
 
-    const encounterHooks = pickManyFromPool(
-      [
-        'Guardians of the reward return after one long rest unless appeased.',
-        'The item resonates near a hidden vault keyed to this theme.',
-        'A rival group can identify this reward and track the party by it.',
-        'The reward can be upgraded by completing a linked side objective.',
-        'Using this reward publicly changes how one faction responds to the party.',
-        'The reward contains a map clue toward a higher-tier location.',
-      ],
-      2,
-      seed + 29
-    );
+    const encounterHooks = pickManyFromPool(rewardConfig.hookPool, 2, seed + 29);
 
     return {
       itemName,
       bonusItem,
       goldAmount,
-      flavorNote: flavorNotes[rewardSource],
+      flavorNote: rewardConfig.flavorNotes[rewardSource],
       practicalAdvice,
       encounterHooks,
-      itemDetail: itemDetailLibrary[itemName] ?? {
-        description: 'A strong thematic reward suitable for this table result.',
-        statLine: 'Treat as tier-appropriate gear with one small situational bonus.',
-      },
-      rewardSummary: `${rarity} ${rewardTheme} ${rewardType} reward from a ${rewardSource} source.`,
+      itemDetail: buildRewardDetail(rewardConfig, {
+        rewardType,
+        rewardTheme,
+        rarity,
+        itemName,
+      }),
+      rewardSummary: rewardConfig.rewardSummary({
+        rarity,
+        rewardTheme,
+        rewardType,
+        rewardSource,
+      }),
     };
-  }, [playerLevel, enemyTier, rewardType, rarity, rewardSource, rewardTheme, bundleStyle, prepNotes, variationSeed]);
+  }, [playerLevel, enemyTier, rewardType, rarity, rewardSource, rewardTheme, bundleStyle, prepNotes, variationSeed, rewardConfig]);
+
+  const rewardRecipientSuggestions = useMemo(
+    () => (dndCampaignContext ? getDndRewardRecipientSuggestions(dndCampaignContext, rewardTheme) : []),
+    [dndCampaignContext, rewardTheme]
+  );
+  const rewardRecipientCandidates = useMemo(
+    () => (dndCampaignContext ? getDndRewardRecipientCandidates(dndCampaignContext, rewardTheme) : []),
+    [dndCampaignContext, rewardTheme]
+  );
+  const promotionHolderOptions = useMemo(
+    () => ['Shared', ...rewardRecipientCandidates.map((member) => member.name)],
+    [rewardRecipientCandidates]
+  );
+  const rewardPromotionBaseKey = useMemo(
+    () =>
+      currentProjectId ??
+      `draft-${buildSeed(
+        [
+          selectedCampaignId,
+          rewardType,
+          rarity,
+          rewardTheme,
+          bundleStyle,
+          result.itemName,
+          result.bonusItem,
+          result.goldAmount,
+        ].join('|')
+      )}`,
+    [
+      bundleStyle,
+      currentProjectId,
+      rarity,
+      result.bonusItem,
+      result.goldAmount,
+      result.itemName,
+      rewardTheme,
+      rewardType,
+      selectedCampaignId,
+    ]
+  );
 
   function buildPayload() {
     return {
@@ -410,9 +527,159 @@ export default function LootScreen() {
       rewardTheme,
       bundleStyle,
       prepNotes,
+      promotionHolder,
+      systemId: effectiveSystemId,
+      systemName: effectiveSystem.label,
       variationSeed,
       result,
     };
+  }
+
+  function buildTreasureLedgerEntry(projectId: string, projectName: string): DndTreasureLedgerEntry | null {
+    if (effectiveSystemId !== 'dnd5e') {
+      return null;
+    }
+
+    return {
+      id: `treasure-ledger-${projectId}`,
+      sourceProjectId: projectId,
+      projectName,
+      savedAt: new Date().toISOString(),
+      rewardType: rewardConfig.rewardTypeLabels[rewardType],
+      rarity: rewardConfig.rarityLabels[rarity],
+      rewardSource: rewardConfig.rewardSourceLabels[rewardSource],
+      rewardTheme: rewardConfig.rewardThemeLabels[rewardTheme],
+      bundleStyle: rewardConfig.bundleStyleLabels[bundleStyle],
+      featuredItem: result.itemName,
+      bonusItem: result.bonusItem,
+      currencyValue: result.goldAmount,
+      rewardSummary: result.rewardSummary,
+      recipientHints: rewardRecipientSuggestions.slice(0, 3),
+      notes: prepNotes.trim(),
+    };
+  }
+
+  async function syncTreasureLedger(projectId: string, projectName: string) {
+    if (!supabase || !sessionUserId || !selectedCampaignId) {
+      return { synced: false, error: null as string | null };
+    }
+
+    const entry = buildTreasureLedgerEntry(projectId, projectName);
+    if (!entry) {
+      return { synced: false, error: null as string | null };
+    }
+
+    try {
+      await syncDndTreasureLedgerEntry(supabase, sessionUserId, selectedCampaignId, entry);
+      await refreshSelectedCampaignData();
+      return { synced: true, error: null as string | null };
+    } catch (error) {
+      return { synced: false, error: getErrorMessage(error) };
+    }
+  }
+
+  function buildPromotedInventoryItem(slot: 'featured' | 'bonus'): DndInventoryItem | null {
+    if (!dndCampaignContext) {
+      return null;
+    }
+
+    const itemName = slot === 'featured' ? result.itemName : result.bonusItem;
+    if (!itemName.trim()) {
+      return null;
+    }
+
+    const bestHolder = promotionHolder.trim() || rewardRecipientCandidates[0]?.name || 'Shared';
+    const slotLabel = slot === 'featured' ? 'featured item' : 'bonus item';
+
+    return {
+      id: `reward-${rewardPromotionBaseKey}-${slot}`,
+      name: itemName,
+      category: getPromotedRewardCategory(rewardType, itemName),
+      quantity: '1',
+      holder: bestHolder,
+      rarity: rewardConfig.rarityLabels[rarity],
+      attunement: getPromotedRewardAttunement(rewardType, rarity, itemName),
+      notes: `Promoted from ${slotLabel} in ${loadedProjectName ?? 'linked reward setup'}. ${result.itemDetail.statLine}`,
+    };
+  }
+
+  async function handlePromoteInventoryItem(slot: 'featured' | 'bonus') {
+    if (!supabase) {
+      setBanner('error', 'Supabase not configured', 'Add your Supabase URL and anon key in the .env file.');
+      return;
+    }
+
+    if (!sessionUserId) {
+      setBanner('error', 'Sign in required', 'Go to the Account tab and sign in before promoting a reward.');
+      return;
+    }
+
+    if (!selectedCampaignId || !dndCampaignContext) {
+      setBanner('info', 'Link a campaign first', 'Select a D&D campaign before promoting rewards into its inventory.');
+      return;
+    }
+
+    const nextItem = buildPromotedInventoryItem(slot);
+    if (!nextItem) {
+      setBanner('info', 'Nothing to add', 'Generate the reward first so there is an item to promote.');
+      return;
+    }
+
+    try {
+      setPromotingReward(slot);
+      await syncDndCampaignInventoryItem(supabase, sessionUserId, selectedCampaignId, nextItem);
+      await refreshSelectedCampaignData();
+      await refreshAppState();
+      setBanner(
+        'success',
+        'Inventory updated',
+        `${nextItem.name} is now on ${selectedCampaign?.name ?? 'the linked campaign'} inventory ledger${nextItem.holder !== 'Shared' ? ` for ${nextItem.holder}` : ' in the shared stash'}.`
+      );
+    } catch (error) {
+      setBanner('error', 'Promotion failed', getErrorMessage(error));
+    } finally {
+      setPromotingReward(null);
+    }
+  }
+
+  async function handlePromoteCurrency() {
+    if (!supabase) {
+      setBanner('error', 'Supabase not configured', 'Add your Supabase URL and anon key in the .env file.');
+      return;
+    }
+
+    if (!sessionUserId) {
+      setBanner('error', 'Sign in required', 'Go to the Account tab and sign in before posting treasure into a treasury.');
+      return;
+    }
+
+    if (!selectedCampaignId || !dndCampaignContext) {
+      setBanner('info', 'Link a campaign first', 'Select a D&D campaign before posting coin into the treasury.');
+      return;
+    }
+
+    try {
+      setPromotingReward('currency');
+      await syncDndTreasuryAwardEntry(supabase, sessionUserId, selectedCampaignId, {
+        id: `treasury-award-${rewardPromotionBaseKey}`,
+        sourceProjectId: rewardPromotionBaseKey,
+        projectName: loadedProjectName ?? 'Linked reward setup',
+        amountGp: result.goldAmount,
+        note: `${rewardConfig.rewardSourceLabels[rewardSource]} payout tied to ${rewardConfig.rewardThemeLabels[rewardTheme].toLowerCase()} treasure.`,
+        updatedAt: new Date().toISOString(),
+      });
+      await refreshSelectedCampaignData();
+      await refreshAppState();
+      setBanner(
+        'success',
+        'Treasury updated',
+        `${result.goldAmount.toLocaleString()} gp has been posted into ${selectedCampaign?.name ?? 'the linked campaign'} treasury.`
+      );
+    } catch (error) {
+      setBanner('error', 'Treasury sync failed', getErrorMessage(error));
+    } finally {
+      setPromotingReward(null);
+    }
   }
 
   async function handleSaveProject(asNew = false) {
@@ -429,8 +696,9 @@ export default function LootScreen() {
     try {
       setSaving(true);
 
-      const payload = buildPayload();
+      const payload = applyCampaignSystemToPayload(buildPayload(), selectedCampaign);
       const timestampName = `Loot - ${new Date().toLocaleString()}`;
+      const campaignMessage = selectedCampaign ? ` in ${selectedCampaign.name}` : '';
 
       if (!asNew && currentProjectId) {
         const { error } = await supabase
@@ -439,7 +707,7 @@ export default function LootScreen() {
             name: loadedProjectName ?? timestampName,
             data: payload,
             updated_at: new Date().toISOString(),
-            campaign_id: null,
+            campaign_id: selectedCampaignId || null,
           })
           .eq('id', currentProjectId)
           .eq('user_id', sessionUserId);
@@ -449,9 +717,13 @@ export default function LootScreen() {
           return;
         }
 
+        const ledgerSync = await syncTreasureLedger(currentProjectId, loadedProjectName ?? timestampName);
         await refreshAppState();
-        setSelectedCampaignId('');
-        setBanner('success', 'Updated', 'Your loot project was updated successfully.');
+        setBanner(
+          ledgerSync.error ? 'info' : 'success',
+          ledgerSync.error ? 'Updated, ledger pending' : 'Updated',
+          `Your loot project was updated successfully${campaignMessage}.${ledgerSync.synced ? ' Campaign ledger synced.' : ''}${ledgerSync.error ? ` Campaign ledger sync failed: ${ledgerSync.error}` : ''}`
+        );
         return;
       }
 
@@ -472,7 +744,7 @@ export default function LootScreen() {
           name: timestampName,
           tool_type: 'loot_generator',
           data: payload,
-          campaign_id: null,
+          campaign_id: selectedCampaignId || null,
         })
         .select()
         .single();
@@ -484,10 +756,14 @@ export default function LootScreen() {
 
       setLoadedProjectName(data?.name ?? timestampName);
       setCurrentProjectId(data?.id ?? null);
-      setSelectedCampaignId('');
+      const ledgerSync = data?.id ? await syncTreasureLedger(data.id, data.name ?? timestampName) : { synced: false, error: null as string | null };
       await refreshAppState();
 
-      setBanner('success', 'Saved', 'Your loot project was saved successfully.');
+      setBanner(
+        ledgerSync.error ? 'info' : 'success',
+        ledgerSync.error ? 'Saved, ledger pending' : 'Saved',
+        `Your loot project was saved successfully${campaignMessage}.${ledgerSync.synced ? ' Campaign ledger synced.' : ''}${ledgerSync.error ? ` Campaign ledger sync failed: ${ledgerSync.error}` : ''}`
+      );
     } finally {
       setSaving(false);
     }
@@ -521,7 +797,7 @@ export default function LootScreen() {
     try {
       setSaving(true);
 
-      const payload = buildPayload();
+      const payload = applyCampaignSystemToPayload(buildPayload(), selectedCampaign);
       const timestampName = loadedProjectName ?? `Loot - ${new Date().toLocaleString()}`;
 
       if (currentProjectId) {
@@ -541,8 +817,13 @@ export default function LootScreen() {
           return;
         }
 
+        const ledgerSync = await syncTreasureLedger(currentProjectId, timestampName);
         await refreshAppState();
-        setBanner('success', 'Campaign updated', 'This project is now linked to the selected campaign.');
+        setBanner(
+          ledgerSync.error ? 'info' : 'success',
+          ledgerSync.error ? 'Campaign updated, ledger pending' : 'Campaign updated',
+          `This project is now linked to the selected campaign.${ledgerSync.synced ? ' Campaign ledger synced.' : ''}${ledgerSync.error ? ` Campaign ledger sync failed: ${ledgerSync.error}` : ''}`
+        );
         return;
       }
 
@@ -565,9 +846,14 @@ export default function LootScreen() {
 
       setLoadedProjectName(data?.name ?? timestampName);
       setCurrentProjectId(data?.id ?? null);
+      const ledgerSync = data?.id ? await syncTreasureLedger(data.id, data.name ?? timestampName) : { synced: false, error: null as string | null };
       await refreshAppState();
 
-      setBanner('success', 'Added to campaign', 'This project was saved into the selected campaign.');
+      setBanner(
+        ledgerSync.error ? 'info' : 'success',
+        ledgerSync.error ? 'Added to campaign, ledger pending' : 'Added to campaign',
+        `This project was saved into the selected campaign.${ledgerSync.synced ? ' Campaign ledger synced.' : ''}${ledgerSync.error ? ` Campaign ledger sync failed: ${ledgerSync.error}` : ''}`
+      );
     } finally {
       setSaving(false);
     }
@@ -575,12 +861,29 @@ export default function LootScreen() {
 
   return (
     <Screen>
-      <Card>
-        <Heading>Reward Designer</Heading>
-        <BodyText>
-          Build more useful treasure by combining source, theme, rarity, bundle feel, and practical reward advice.
-        </BodyText>
-      </Card>
+      <SystemHero
+        systemId={effectiveSystemId}
+        eyebrow={effectiveSystem.shortLabel}
+        title={effectiveSystem.generator.title}
+        body={effectiveSystem.generator.description}
+        chips={[
+          rewardConfig.rewardTypeLabels[rewardType],
+          rewardConfig.rarityLabels[rarity],
+          dndCampaignContext
+            ? dndCampaignContext.partySize > 0
+              ? `${dndCampaignContext.partySize}-PC party`
+              : rewardConfig.rewardSourceLabels[rewardSource]
+            : rewardConfig.rewardSourceLabels[rewardSource],
+          selectedCampaign ? `Campaign: ${selectedCampaign.name}` : 'Standalone hoard',
+        ]}
+      >
+        {loadedProjectName ? (
+          <View style={styles.heroMetaRow}>
+            <Label style={styles.heroMetaLabel}>Loaded project</Label>
+            <BodyText>{loadedProjectName}</BodyText>
+          </View>
+        ) : null}
+      </SystemHero>
 
       {statusBanner ? (
         <StatusBanner
@@ -599,20 +902,20 @@ export default function LootScreen() {
       />
 
       {loadingProject ? (
-        <Card>
+        <SystemPanel systemId={effectiveSystemId} tone="muted">
           <View style={styles.sessionRow}>
             <ActivityIndicator />
             <BodyText>Loading saved project...</BodyText>
           </View>
-        </Card>
+        </SystemPanel>
       ) : loadedProjectName ? (
-        <Card>
+        <SystemPanel systemId={effectiveSystemId} tone="muted">
           <Label>Loaded project</Label>
           <BodyText>{loadedProjectName}</BodyText>
-        </Card>
+        </SystemPanel>
       ) : null}
 
-      <Card>
+      <SystemPanel systemId={effectiveSystemId} tone="accent">
         <Label>Campaign Link</Label>
 
         {!isPro ? (
@@ -624,23 +927,11 @@ export default function LootScreen() {
               </BodyText>
             </View>
 
-            <View style={styles.lockedPillRow}>
-              <View style={[styles.pill, styles.lockedPill]}>
-                <BodyText style={styles.lockedPillText}>none</BodyText>
-              </View>
-              <View style={[styles.pill, styles.lockedPill]}>
-                <BodyText style={styles.lockedPillText}>Campaign Alpha</BodyText>
-              </View>
-              <View style={[styles.pill, styles.lockedPill]}>
-                <BodyText style={styles.lockedPillText}>Boss Arc</BodyText>
-              </View>
-            </View>
-
             <BodyText style={styles.proLockedHint}>
               {campaignLinkUpsell.message}
             </BodyText>
 
-            <Pressable onPress={handleUpgradePress} style={styles.inlineUpgradeButton}>
+            <Pressable onPress={handleUpgradePress} style={[styles.inlineUpgradeButton, { backgroundColor: palette.accent }]}>
               <Label style={styles.inlineUpgradeButtonText}>{campaignLinkUpsell.buttonLabel}</Label>
             </Pressable>
           </View>
@@ -652,8 +943,11 @@ export default function LootScreen() {
         ) : campaignOptions.length > 0 ? (
           <View style={styles.pillRow}>
             <Pressable
-              onPress={() => setSelectedCampaignId('')}
-              style={[styles.pill, selectedCampaignId === '' && styles.pillSelected]}
+              onPress={() => {
+                setSelectedCampaignId('');
+                setLockedCampaignSystemId(null);
+              }}
+              style={[styles.pill, selectedCampaignId === '' && { backgroundColor: palette.accent, borderColor: palette.accent }]}
             >
               <BodyText style={selectedCampaignId === '' ? styles.pillTextSelected : undefined}>
                 none
@@ -666,11 +960,15 @@ export default function LootScreen() {
               return (
                 <Pressable
                   key={campaign.id}
-                  onPress={() => setSelectedCampaignId(campaign.id)}
-                  style={[styles.pill, selected && styles.pillSelected]}
+                  onPress={() => {
+                    setSelectedCampaignId(campaign.id);
+                    setLockedCampaignSystemId(campaign.systemId);
+                    setActiveSystemId(campaign.systemId);
+                  }}
+                  style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
                 >
                   <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                    {campaign.name}
+                    {campaign.name} • {campaign.systemShortLabel}
                   </BodyText>
                 </Pressable>
               );
@@ -680,23 +978,37 @@ export default function LootScreen() {
           <BodyText>No saved campaigns yet. Create one in Campaign Hub to link this project.</BodyText>
         )}
 
-        <Label>Player Level</Label>
+        {selectedCampaign ? (
+          <BodyText>Ruleset locked to {selectedCampaign.systemName} while linked to {selectedCampaign.name}.</BodyText>
+        ) : null}
+
+        {dndCampaignContext ? (
+          <View style={styles.resultRow}>
+            <BodyText>
+              Imported from campaign: average level {dndCampaignContext.averageLevel ?? 'n/a'} across{' '}
+              {dndCampaignContext.partySize} hero sheets.
+            </BodyText>
+            <BodyText>{dndCampaignContext.treasurySummary}</BodyText>
+          </View>
+        ) : null}
+
+        <Label>{rewardConfig.labels.playerLevel}</Label>
         <AppInput
           value={playerLevel}
           onChangeText={setPlayerLevel}
           keyboardType="numeric"
-          placeholder="5"
+          placeholder={rewardConfig.defaults.playerLevel}
         />
 
-        <Label>Enemy Tier</Label>
+        <Label>{rewardConfig.labels.enemyTier}</Label>
         <AppInput
           value={enemyTier}
           onChangeText={setEnemyTier}
           keyboardType="numeric"
-          placeholder="1"
+          placeholder={rewardConfig.defaults.enemyTier}
         />
 
-        <Label>Reward Type</Label>
+        <Label>{rewardConfig.labels.rewardType}</Label>
         <View style={styles.pillRow}>
           {(['gear', 'gold', 'consumable', 'material'] as RewardType[]).map((option) => {
             const selected = rewardType === option;
@@ -705,36 +1017,36 @@ export default function LootScreen() {
               <Pressable
                 key={option}
                 onPress={() => setRewardType(option)}
-                style={[styles.pill, selected && styles.pillSelected]}
+                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
               >
                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                  {option}
+                  {rewardConfig.rewardTypeLabels[option]}
                 </BodyText>
               </Pressable>
             );
           })}
         </View>
 
-        <Label>Rarity</Label>
+        <Label>{rewardConfig.labels.rarity}</Label>
         <View style={styles.pillRow}>
           {(['common', 'uncommon', 'rare', 'epic', 'legendary'] as LootRarity[]).map((option) => {
             const selected = rarity === option;
 
             return (
-              <Pressable
-                key={option}
-                onPress={() => setRarity(option)}
-                style={[styles.pill, selected && styles.pillSelected]}
-              >
-                <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                  {option}
-                </BodyText>
-              </Pressable>
-            );
+                <Pressable
+                  key={option}
+                  onPress={() => setRarity(option)}
+                  style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
+                >
+                  <BodyText style={selected ? styles.pillTextSelected : undefined}>
+                    {rewardConfig.rarityLabels[option]}
+                  </BodyText>
+                </Pressable>
+              );
           })}
         </View>
 
-        <Label>Reward Source</Label>
+        <Label>{rewardConfig.labels.rewardSource}</Label>
         <View style={styles.pillRow}>
           {(['boss', 'chest', 'quest', 'vendor', 'faction'] as RewardSource[]).map((option) => {
             const selected = rewardSource === option;
@@ -743,17 +1055,17 @@ export default function LootScreen() {
               <Pressable
                 key={option}
                 onPress={() => setRewardSource(option)}
-                style={[styles.pill, selected && styles.pillSelected]}
+                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
               >
                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                  {option}
+                  {rewardConfig.rewardSourceLabels[option]}
                 </BodyText>
               </Pressable>
             );
           })}
         </View>
 
-        <Label>Reward Theme</Label>
+        <Label>{rewardConfig.labels.rewardTheme}</Label>
         <View style={styles.pillRow}>
           {(['arcane', 'divine', 'cursed', 'martial', 'wilderness', 'noble'] as RewardTheme[]).map((option) => {
             const selected = rewardTheme === option;
@@ -762,17 +1074,17 @@ export default function LootScreen() {
               <Pressable
                 key={option}
                 onPress={() => setRewardTheme(option)}
-                style={[styles.pill, selected && styles.pillSelected]}
+                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
               >
                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                  {option}
+                  {rewardConfig.rewardThemeLabels[option]}
                 </BodyText>
               </Pressable>
             );
           })}
         </View>
 
-        <Label>Bundle Style</Label>
+        <Label>{rewardConfig.labels.bundleStyle}</Label>
         <View style={styles.pillRow}>
           {(['lean', 'balanced', 'generous'] as BundleStyle[]).map((option) => {
             const selected = bundleStyle === option;
@@ -781,25 +1093,25 @@ export default function LootScreen() {
               <Pressable
                 key={option}
                 onPress={() => setBundleStyle(option)}
-                style={[styles.pill, selected && styles.pillSelected]}
+                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
               >
                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                  {option}
+                  {rewardConfig.bundleStyleLabels[option]}
                 </BodyText>
               </Pressable>
             );
           })}
         </View>
 
-        <Label>Prep Notes</Label>
+        <Label>{rewardConfig.labels.prepNotes}</Label>
         <AppInput
           value={prepNotes}
           onChangeText={setPrepNotes}
-          placeholder="Boss cache, faction-issued reward, reward tied to blacksmith upgrade path..."
+          placeholder={rewardConfig.labels.prepNotesPlaceholder}
           multiline
         />
         <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
-          <Label style={styles.secondaryButtonText}>Reroll Reward Flavor</Label>
+          <Label style={styles.secondaryButtonText}>{rewardConfig.labels.rerollButton}</Label>
         </Pressable>
 
         <View style={styles.saveRow}>
@@ -807,10 +1119,22 @@ export default function LootScreen() {
             <Pressable
               onPress={() => handleSaveProject(false)}
               disabled={saving || loadingSession}
-              style={[styles.saveButton, (saving || loadingSession) && styles.saveButtonDisabled]}
+              style={[
+                styles.saveButton,
+                { backgroundColor: palette.accent },
+                (saving || loadingSession) && styles.saveButtonDisabled,
+              ]}
             >
               <Label style={styles.saveButtonText}>
-                {saving ? 'Saving...' : currentProjectId ? 'Update Project' : 'Save Project'}
+                {saving
+                  ? 'Saving...'
+                  : currentProjectId
+                    ? selectedCampaignId
+                      ? 'Update Linked Project'
+                      : 'Update Project'
+                    : selectedCampaignId
+                      ? 'Save to Campaign'
+                      : 'Save Project'}
               </Label>
             </Pressable>
 
@@ -827,15 +1151,16 @@ export default function LootScreen() {
               disabled={saving || loadingSession || !isPro || !selectedCampaignId}
               style={[
                 styles.campaignButton,
+                { borderColor: palette.accent },
                 (saving || loadingSession || !isPro || !selectedCampaignId) && styles.saveButtonDisabled,
               ]}
             >
               <Label style={styles.campaignButtonText}>
                 {!isPro
-                  ? 'Add to Campaign'
+                  ? 'Link to Campaign'
                   : currentProjectId && selectedCampaignId
-                    ? 'Update Campaign'
-                    : 'Add to Campaign'}
+                    ? 'Relink Campaign'
+                    : 'Link to Campaign'}
               </Label>
             </Pressable>
           </View>
@@ -848,8 +1173,10 @@ export default function LootScreen() {
           ) : sessionUserId ? (
             <BodyText>
               {currentProjectId
-                ? 'Loaded project detected. You can update it, save a new copy, or add it to a campaign.'
-                : 'Signed in. Saving is enabled.'}
+                ? 'Loaded project detected. Save respects the selected campaign automatically, or save a new copy.'
+                : selectedCampaignId
+                  ? 'Signed in. Save Project will use the selected campaign by default.'
+                  : 'Signed in. Saving is enabled.'}
             </BodyText>
           ) : (
             <BodyText>Not signed in. You can generate loot, but not save yet.</BodyText>
@@ -864,44 +1191,136 @@ export default function LootScreen() {
             />
           ) : null}
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Reward Summary</Label>
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{rewardConfig.labels.rewardSummary}</Label>
         <View style={styles.resultRow}>
           <BodyText>{result.rewardSummary}</BodyText>
-          <BodyText>Featured item: {result.itemName}</BodyText>
-          <BodyText>Item detail: {result.itemDetail.description}</BodyText>
-          <BodyText>Stat block: {result.itemDetail.statLine}</BodyText>
-          <BodyText>Bonus add-on: {result.bonusItem}</BodyText>
-          <BodyText>Gold value: {result.goldAmount}</BodyText>
+          <BodyText>{rewardConfig.labels.featuredItem}: {result.itemName}</BodyText>
+          <BodyText>{rewardConfig.labels.itemDetail}: {result.itemDetail.description}</BodyText>
+          <BodyText>{rewardConfig.labels.statLine}: {result.itemDetail.statLine}</BodyText>
+          <BodyText>{rewardConfig.labels.bonusItem}: {result.bonusItem}</BodyText>
+          <BodyText>{rewardConfig.labels.currencyValue}: {result.goldAmount}</BodyText>
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Source Guidance</Label>
+      {dndCampaignContext ? (
+        <SystemPanel systemId={effectiveSystemId}>
+          <Label>Party Inventory Context</Label>
+          <View style={styles.resultRow}>
+            {dndCampaignContext.inventorySummaryLines.map((entry, index) => (
+              <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+            ))}
+            {dndCampaignContext.trackedItemNames.length > 0 ? (
+              <BodyText>Ledger snapshot: {dndCampaignContext.trackedItemNames.slice(0, 6).join(', ')}.</BodyText>
+            ) : null}
+          </View>
+        </SystemPanel>
+      ) : null}
+
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{rewardConfig.labels.sourceGuidance}</Label>
         <View style={styles.resultRow}>
           <BodyText>{result.flavorNote}</BodyText>
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Practical Reward Advice</Label>
+      {dndCampaignContext ? (
+        <SystemPanel systemId={effectiveSystemId}>
+          <Label>Promote Into Campaign</Label>
+          <View style={styles.resultRow}>
+            <BodyText>
+              Post this reward straight into {selectedCampaign?.name ?? 'the linked campaign'} so the party ledger and treasury keep pace with generated treasure.
+            </BodyText>
+            <Label>Assign promoted items to</Label>
+            <View style={styles.pillRow}>
+              {promotionHolderOptions.map((option) => {
+                const selected = promotionHolder === option;
+
+                return (
+                  <Pressable
+                    key={option}
+                    onPress={() => setPromotionHolder(option)}
+                    style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
+                  >
+                    <BodyText style={selected ? styles.pillTextSelected : undefined}>{option}</BodyText>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.actionRow}>
+              <Pressable
+                onPress={() => handlePromoteInventoryItem('featured')}
+                disabled={promotingReward !== null}
+                style={[styles.secondaryButton, promotingReward !== null && styles.saveButtonDisabled]}
+              >
+                <Label style={styles.secondaryButtonText}>
+                  {promotingReward === 'featured' ? 'Adding Featured...' : 'Promote Featured Item'}
+                </Label>
+              </Pressable>
+
+              <Pressable
+                onPress={() => handlePromoteInventoryItem('bonus')}
+                disabled={promotingReward !== null || result.bonusItem.trim().length === 0}
+                style={[
+                  styles.secondaryButton,
+                  (promotingReward !== null || result.bonusItem.trim().length === 0) && styles.saveButtonDisabled,
+                ]}
+              >
+                <Label style={styles.secondaryButtonText}>
+                  {promotingReward === 'bonus' ? 'Adding Bonus...' : 'Promote Bonus Item'}
+                </Label>
+              </Pressable>
+
+              <Pressable
+                onPress={handlePromoteCurrency}
+                disabled={promotingReward !== null}
+                style={[styles.campaignButton, { borderColor: palette.accent }, promotingReward !== null && styles.saveButtonDisabled]}
+              >
+                <Label style={styles.campaignButtonText}>
+                  {promotingReward === 'currency' ? 'Posting Coin...' : 'Post Coin to Treasury'}
+                </Label>
+              </Pressable>
+            </View>
+            <BodyText>
+              Best current fit: {rewardRecipientCandidates[0]?.name ?? 'Shared party stash'}.
+            </BodyText>
+          </View>
+        </SystemPanel>
+      ) : null}
+
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{rewardConfig.labels.practicalAdvice}</Label>
         <View style={styles.resultRow}>
           {result.practicalAdvice.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Encounter Hook Ideas</Label>
+      {dndCampaignContext ? (
+        <SystemPanel systemId={effectiveSystemId}>
+          <Label>Best Party Fits</Label>
+          <View style={styles.resultRow}>
+            {rewardRecipientSuggestions.map((entry, index) => (
+              <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+            ))}
+            {dndCampaignContext.attunementItems.length > 0 ? (
+              <BodyText>Current attunement watch list: {dndCampaignContext.attunementItems.join(', ')}.</BodyText>
+            ) : null}
+          </View>
+        </SystemPanel>
+      ) : null}
+
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{rewardConfig.labels.encounterHooks}</Label>
         <View style={styles.resultRow}>
           {result.encounterHooks.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </Card>
+      </SystemPanel>
     </Screen>
   );
 }
@@ -911,6 +1330,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.sm,
     flexWrap: 'wrap',
+  },
+  heroMetaRow: {
+    gap: 4,
+    paddingTop: Spacing.xs,
+  },
+  heroMetaLabel: {
+    color: Colors.text,
   },
   pill: {
     backgroundColor: Colors.elevated,

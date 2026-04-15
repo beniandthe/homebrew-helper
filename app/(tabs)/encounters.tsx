@@ -6,26 +6,114 @@ import { useAppState } from '@/contexts/AppStateContext';
 import { ProCard } from '@/components/ProCard';
 import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
-import { BodyText, Heading, Label } from '@/components/AppText';
-import { Card } from '@/components/Card';
+import { BodyText, Label } from '@/components/AppText';
 import { Screen } from '@/components/Screen';
+import { SystemHero } from '@/components/SystemHero';
+import { SystemPanel } from '@/components/SystemPanel';
 import { Colors, Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { StatusBanner, type StatusBannerVariant } from '@/components/StatusBanner';
+import { useGameSystem } from '@/contexts/GameSystemContext';
+import { buildDndCampaignLinkContext } from '@/lib/dndCampaignLinkContext';
+import {
+  syncDndEncounterLedgerEntry,
+  syncDndThreatClockEntry,
+  type DndEncounterLedgerEntry,
+  type DndThreatClockEntry,
+  type DndThreatClockStatus,
+} from '@/lib/dndCampaignLedger';
 import { buildSeed, pickManyFromPool } from '@/lib/generation';
-import { fetchCampaignOptions, fetchLatestSaveAccess, getErrorMessage } from '@/lib/projectAccess';
+import {
+  getEncounterSystemConfig,
+  type EncounterDifficulty,
+  type EnemyRole,
+  type TerrainType,
+} from '@/lib/encounterSystemConfig';
+import { getGameSystem, resolveGameSystemId, type GameSystemId } from '@/lib/gameSystems';
+import { getSystemPresentation } from '@/lib/systemPresentation';
+import {
+  applyCampaignSystemToPayload,
+  fetchCampaignOptionById,
+  fetchCampaignOptions,
+  fetchLatestSaveAccess,
+  getErrorMessage,
+  type CampaignOption,
+} from '@/lib/projectAccess';
 import { getCampaignLinkUpsell, getFreeLimitUpsell } from '@/lib/subscriptionUi';
 
-type Difficulty = 'easy' | 'standard' | 'hard' | 'deadly';
-type EnemyRole = 'brute' | 'skirmisher' | 'controller' | 'artillery' | 'boss';
-type TerrainType = 'open' | 'cover-heavy' | 'hazardous' | 'chokepoint' | 'elevated';
+const DIFFICULTY_OPTIONS: EncounterDifficulty[] = ['easy', 'standard', 'hard', 'deadly'];
+const ENEMY_ROLE_OPTIONS: EnemyRole[] = ['brute', 'skirmisher', 'controller', 'artillery', 'boss'];
+const TERRAIN_OPTIONS: TerrainType[] = ['open', 'cover-heavy', 'hazardous', 'chokepoint', 'elevated'];
+const THREAT_STATUS_OPTIONS: DndThreatClockStatus[] = ['lurking', 'active', 'escalating', 'contained', 'resolved'];
+const ESCALATION_TAG_OPTIONS = ['Alerted', 'Hunted', 'Exposed', 'Under Siege', 'On the Run'];
+
+function isEncounterDifficulty(value: unknown): value is EncounterDifficulty {
+  return typeof value === 'string' && DIFFICULTY_OPTIONS.includes(value as EncounterDifficulty);
+}
+
+function isEnemyRole(value: unknown): value is EnemyRole {
+  return typeof value === 'string' && ENEMY_ROLE_OPTIONS.includes(value as EnemyRole);
+}
+
+function isTerrainType(value: unknown): value is TerrainType {
+  return typeof value === 'string' && TERRAIN_OPTIONS.includes(value as TerrainType);
+}
+
+function isThreatClockStatus(value: unknown): value is DndThreatClockStatus {
+  return typeof value === 'string' && THREAT_STATUS_OPTIONS.includes(value as DndThreatClockStatus);
+}
+
+function getRecommendedThreatClock(difficulty: EncounterDifficulty) {
+  switch (difficulty) {
+    case 'easy':
+      return { filled: 2, total: 4 };
+    case 'hard':
+      return { filled: 4, total: 6 };
+    case 'deadly':
+      return { filled: 5, total: 6 };
+    case 'standard':
+    default:
+      return { filled: 3, total: 4 };
+  }
+}
+
+function formatThreatClockStatusLabel(value: DndThreatClockStatus) {
+  switch (value) {
+    case 'lurking':
+      return 'Lurking';
+    case 'active':
+      return 'Active';
+    case 'escalating':
+      return 'Escalating';
+    case 'contained':
+      return 'Contained';
+    case 'resolved':
+      return 'Resolved';
+    default:
+      return value;
+  }
+}
+
+function getDefaultEscalationTag(difficulty: EncounterDifficulty) {
+  switch (difficulty) {
+    case 'easy':
+      return 'Alerted';
+    case 'hard':
+      return 'Hunted';
+    case 'deadly':
+      return 'Under Siege';
+    case 'standard':
+    default:
+      return 'Exposed';
+  }
+}
 
 type EncounterProjectData = {
   partyLevel?: number;
   partySize?: number;
   enemyCount?: number;
   enemyLevel?: number;
-  difficulty?: Difficulty;
+  difficulty?: EncounterDifficulty;
   enemyRole?: EnemyRole;
   terrainType?: TerrainType;
   waveCount?: number;
@@ -34,43 +122,89 @@ type EncounterProjectData = {
   controlCount?: number;
   strikerCount?: number;
   encounterNotes?: string;
+  threatTitle?: string;
+  threatStatus?: DndThreatClockStatus;
+  threatClockFilled?: number;
+  threatClockTotal?: number;
+  linkedNpcId?: string;
+  linkedNpcName?: string;
+  linkedFaction?: string;
+  escalationTag?: string;
+  sessionFallout?: string;
+  systemId?: GameSystemId;
+  systemName?: string;
 };
-
-type CampaignOption = {
-  id: string;
-  name: string;
-};
-
 
 export default function EncounterScreen() {
   const params = useLocalSearchParams<{ projectId?: string }>();
+  const { activeSystemId, setActiveSystemId } = useGameSystem();
+  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState('');
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [lockedCampaignSystemId, setLockedCampaignSystemId] = useState<GameSystemId | null>(null);
+  const selectedCampaign = useMemo(
+    () => campaignOptions.find((campaign) => campaign.id === selectedCampaignId) ?? null,
+    [campaignOptions, selectedCampaignId]
+  );
+  const effectiveSystemId = lockedCampaignSystemId ?? activeSystemId;
+  const effectiveSystem = useMemo(() => getGameSystem(effectiveSystemId), [effectiveSystemId]);
+  const encounterConfig = useMemo(() => getEncounterSystemConfig(effectiveSystemId), [effectiveSystemId]);
+  const palette = useMemo(() => getSystemPresentation(effectiveSystemId).palette, [effectiveSystemId]);
+  const dndCampaignContext = useMemo(
+    () => (effectiveSystemId === 'dnd5e' ? buildDndCampaignLinkContext(selectedCampaign?.data) : null),
+    [effectiveSystemId, selectedCampaign?.data]
+  );
 
-  const [partyLevel, setPartyLevel] = useState('3');
-  const [partySize, setPartySize] = useState('4');
-  const [enemyCount, setEnemyCount] = useState('4');
-  const [enemyLevel, setEnemyLevel] = useState('3');
+  const [partyLevel, setPartyLevel] = useState(encounterConfig.defaults.partyLevel);
+  const [partySize, setPartySize] = useState(encounterConfig.defaults.partySize);
+  const [enemyCount, setEnemyCount] = useState(encounterConfig.defaults.enemyCount);
+  const [enemyLevel, setEnemyLevel] = useState(encounterConfig.defaults.enemyLevel);
 
-  const [difficulty, setDifficulty] = useState<Difficulty>('standard');
-  const [enemyRole, setEnemyRole] = useState<EnemyRole>('brute');
-  const [terrainType, setTerrainType] = useState<TerrainType>('open');
-  const [waveCount, setWaveCount] = useState('1');
+  const [difficulty, setDifficulty] = useState<EncounterDifficulty>(encounterConfig.defaults.difficulty);
+  const [enemyRole, setEnemyRole] = useState<EnemyRole>(encounterConfig.defaults.enemyRole);
+  const [terrainType, setTerrainType] = useState<TerrainType>(encounterConfig.defaults.terrainType);
+  const [waveCount, setWaveCount] = useState(encounterConfig.defaults.waveCount);
 
-  const [frontlineCount, setFrontlineCount] = useState('1');
-  const [supportCount, setSupportCount] = useState('1');
-  const [controlCount, setControlCount] = useState('1');
-  const [strikerCount, setStrikerCount] = useState('1');
+  const [frontlineCount, setFrontlineCount] = useState(encounterConfig.defaults.frontlineCount);
+  const [supportCount, setSupportCount] = useState(encounterConfig.defaults.supportCount);
+  const [controlCount, setControlCount] = useState(encounterConfig.defaults.controlCount);
+  const [strikerCount, setStrikerCount] = useState(encounterConfig.defaults.strikerCount);
 
   const [encounterNotes, setEncounterNotes] = useState('');
+  const [threatTitle, setThreatTitle] = useState('');
+  const [threatStatus, setThreatStatus] = useState<DndThreatClockStatus>('active');
+  const [threatClockFilled, setThreatClockFilled] = useState(String(getRecommendedThreatClock(encounterConfig.defaults.difficulty).filled));
+  const [threatClockTotal, setThreatClockTotal] = useState(String(getRecommendedThreatClock(encounterConfig.defaults.difficulty).total));
+  const [linkedNpcId, setLinkedNpcId] = useState('');
+  const [linkedFaction, setLinkedFaction] = useState('');
+  const [escalationTag, setEscalationTag] = useState(getDefaultEscalationTag(encounterConfig.defaults.difficulty));
+  const [sessionFallout, setSessionFallout] = useState('');
   const [variationSeed, setVariationSeed] = useState(0);
+  const [appliedCampaignDefaultsId, setAppliedCampaignDefaultsId] = useState('');
+  const selectedNpc = useMemo(
+    () => dndCampaignContext?.npcRoster.find((npc) => npc.id === linkedNpcId) ?? null,
+    [dndCampaignContext, linkedNpcId]
+  );
+  const factionOptions = useMemo(() => {
+    if (!dndCampaignContext) {
+      return [];
+    }
+
+    return Array.from(
+      new Set(
+        [
+          dndCampaignContext.mainFaction,
+          ...dndCampaignContext.npcRoster.map((npc) => npc.affiliation),
+          ...dndCampaignContext.activeThreats.map((entry) => entry.linkedFaction),
+        ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      )
+    );
+  }, [dndCampaignContext]);
 
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState('');
-  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
 
   const {
     userId: sessionUserId,
@@ -121,6 +255,30 @@ export default function EncounterScreen() {
     }
   }, [sessionUserId]);
 
+  const refreshSelectedCampaignData = useCallback(async () => {
+    if (!supabase || !sessionUserId || !selectedCampaignId) {
+      return;
+    }
+
+    try {
+      const refreshed = await fetchCampaignOptionById(supabase, sessionUserId, selectedCampaignId);
+      if (!refreshed) {
+        return;
+      }
+
+      setCampaignOptions((current) => {
+        const existing = current.find((campaign) => campaign.id === refreshed.id);
+        if (!existing) {
+          return [refreshed, ...current];
+        }
+
+        return current.map((campaign) => (campaign.id === refreshed.id ? refreshed : campaign));
+      });
+    } catch {
+      // Keep the current screen usable even if the background refresh misses.
+    }
+  }, [selectedCampaignId, sessionUserId]);
+
   function handleUpgradePress() {
     router.push('/pricing');
   }
@@ -141,6 +299,105 @@ export default function EncounterScreen() {
   }, [isPro]);
 
   useEffect(() => {
+    if (params.projectId || currentProjectId) {
+      return;
+    }
+
+    setPartyLevel(encounterConfig.defaults.partyLevel);
+    setPartySize(encounterConfig.defaults.partySize);
+    setEnemyCount(encounterConfig.defaults.enemyCount);
+    setEnemyLevel(encounterConfig.defaults.enemyLevel);
+    setDifficulty(encounterConfig.defaults.difficulty);
+    setEnemyRole(encounterConfig.defaults.enemyRole);
+    setTerrainType(encounterConfig.defaults.terrainType);
+    setWaveCount(encounterConfig.defaults.waveCount);
+    setFrontlineCount(encounterConfig.defaults.frontlineCount);
+    setSupportCount(encounterConfig.defaults.supportCount);
+    setControlCount(encounterConfig.defaults.controlCount);
+    setStrikerCount(encounterConfig.defaults.strikerCount);
+    setEncounterNotes('');
+    setThreatTitle('');
+    setThreatStatus('active');
+    setThreatClockFilled(String(getRecommendedThreatClock(encounterConfig.defaults.difficulty).filled));
+    setThreatClockTotal(String(getRecommendedThreatClock(encounterConfig.defaults.difficulty).total));
+    setLinkedNpcId('');
+    setLinkedFaction('');
+    setEscalationTag(getDefaultEscalationTag(encounterConfig.defaults.difficulty));
+    setSessionFallout('');
+    setVariationSeed(0);
+    setAppliedCampaignDefaultsId('');
+  }, [encounterConfig, params.projectId, currentProjectId]);
+
+  useEffect(() => {
+    if (!selectedCampaignId) {
+      setAppliedCampaignDefaultsId('');
+      return;
+    }
+
+    if (effectiveSystemId !== 'dnd5e' || !dndCampaignContext) {
+      return;
+    }
+
+    if (params.projectId || currentProjectId || appliedCampaignDefaultsId === selectedCampaignId) {
+      return;
+    }
+
+    if (dndCampaignContext.averageLevel) {
+      setPartyLevel(String(dndCampaignContext.averageLevel));
+      setEnemyLevel(String(dndCampaignContext.averageLevel));
+    }
+
+    if (dndCampaignContext.partySize > 0) {
+      setPartySize(String(dndCampaignContext.partySize));
+      setEnemyCount(String(Math.max(1, dndCampaignContext.partySize)));
+    }
+
+    setFrontlineCount(String(dndCampaignContext.roleMix.frontline));
+    setSupportCount(String(dndCampaignContext.roleMix.support));
+    setControlCount(String(dndCampaignContext.roleMix.control));
+    setStrikerCount(String(dndCampaignContext.roleMix.striker));
+
+    if (encounterNotes.trim().length === 0 && dndCampaignContext.defaultEncounterNote) {
+      setEncounterNotes(dndCampaignContext.defaultEncounterNote);
+    }
+
+    if (threatTitle.trim().length === 0) {
+      const objectiveLead = dndCampaignContext.currentObjective || dndCampaignContext.mainFaction;
+      const roleLabel = encounterConfig.enemyRoleLabels[enemyRole];
+      setThreatTitle(objectiveLead ? `${roleLabel} pressure around ${objectiveLead}` : `${roleLabel} threat`);
+    }
+
+    if (sessionFallout.trim().length === 0 && dndCampaignContext.activeThreats[0]) {
+      setSessionFallout(`Escalation can spill into ${dndCampaignContext.activeThreats[0].title.toLowerCase()}.`);
+    }
+
+    if (linkedFaction.trim().length === 0 && dndCampaignContext.mainFaction) {
+      setLinkedFaction(dndCampaignContext.mainFaction);
+    }
+
+    if (escalationTag.trim().length === 0) {
+      setEscalationTag(getDefaultEscalationTag(difficulty));
+    }
+
+    setAppliedCampaignDefaultsId(selectedCampaignId);
+  }, [
+    appliedCampaignDefaultsId,
+    currentProjectId,
+    dndCampaignContext,
+    effectiveSystemId,
+    encounterConfig.enemyRoleLabels,
+    encounterNotes,
+    escalationTag,
+    enemyRole,
+    difficulty,
+    linkedFaction,
+    params.projectId,
+    sessionFallout,
+    selectedCampaignId,
+    threatTitle,
+  ]);
+
+  useEffect(() => {
     async function loadProject() {
       if (!supabase) return;
       if (!sessionUserId) return;
@@ -149,6 +406,7 @@ export default function EncounterScreen() {
         setLoadedProjectName(null);
         setCurrentProjectId(null);
         setSelectedCampaignId('');
+        setLockedCampaignSystemId(null);
         return;
       }
 
@@ -168,11 +426,21 @@ export default function EncounterScreen() {
         }
 
         const projectData = (data?.data ?? {}) as EncounterProjectData;
+        let linkedCampaign: CampaignOption | null = null;
 
         if (typeof data?.campaign_id === 'string' && isPro) {
           setSelectedCampaignId(data.campaign_id);
+          linkedCampaign = await fetchCampaignOptionById(supabase, sessionUserId, data.campaign_id);
         } else {
           setSelectedCampaignId('');
+          setLockedCampaignSystemId(null);
+        }
+
+        if (linkedCampaign) {
+          setLockedCampaignSystemId(linkedCampaign.systemId);
+          setActiveSystemId(linkedCampaign.systemId);
+        } else if (projectData.systemId || projectData.systemName) {
+          setActiveSystemId(resolveGameSystemId(projectData.systemId ?? projectData.systemName));
         }
 
         if (typeof projectData.partyLevel === 'number') {
@@ -191,32 +459,15 @@ export default function EncounterScreen() {
           setEnemyLevel(String(projectData.enemyLevel));
         }
 
-        if (
-          projectData.difficulty === 'easy' ||
-          projectData.difficulty === 'standard' ||
-          projectData.difficulty === 'hard' ||
-          projectData.difficulty === 'deadly'
-        ) {
+        if (isEncounterDifficulty(projectData.difficulty)) {
           setDifficulty(projectData.difficulty);
         }
 
-        if (
-          projectData.enemyRole === 'brute' ||
-          projectData.enemyRole === 'skirmisher' ||
-          projectData.enemyRole === 'controller' ||
-          projectData.enemyRole === 'artillery' ||
-          projectData.enemyRole === 'boss'
-        ) {
+        if (isEnemyRole(projectData.enemyRole)) {
           setEnemyRole(projectData.enemyRole);
         }
 
-        if (
-          projectData.terrainType === 'open' ||
-          projectData.terrainType === 'cover-heavy' ||
-          projectData.terrainType === 'hazardous' ||
-          projectData.terrainType === 'chokepoint' ||
-          projectData.terrainType === 'elevated'
-        ) {
+        if (isTerrainType(projectData.terrainType)) {
           setTerrainType(projectData.terrainType);
         }
 
@@ -244,6 +495,38 @@ export default function EncounterScreen() {
           setEncounterNotes(projectData.encounterNotes);
         }
 
+        if (typeof projectData.threatTitle === 'string') {
+          setThreatTitle(projectData.threatTitle);
+        }
+
+        if (isThreatClockStatus(projectData.threatStatus)) {
+          setThreatStatus(projectData.threatStatus);
+        }
+
+        if (typeof projectData.threatClockFilled === 'number') {
+          setThreatClockFilled(String(projectData.threatClockFilled));
+        }
+
+        if (typeof projectData.threatClockTotal === 'number') {
+          setThreatClockTotal(String(projectData.threatClockTotal));
+        }
+
+        if (typeof projectData.linkedNpcId === 'string') {
+          setLinkedNpcId(projectData.linkedNpcId);
+        }
+
+        if (typeof projectData.linkedFaction === 'string') {
+          setLinkedFaction(projectData.linkedFaction);
+        }
+
+        if (typeof projectData.escalationTag === 'string') {
+          setEscalationTag(projectData.escalationTag);
+        }
+
+        if (typeof projectData.sessionFallout === 'string') {
+          setSessionFallout(projectData.sessionFallout);
+        }
+
         setLoadedProjectName(data?.name ?? 'Loaded project');
         setCurrentProjectId(data?.id ?? null);
       } finally {
@@ -252,7 +535,7 @@ export default function EncounterScreen() {
     }
 
     loadProject();
-  }, [params.projectId, sessionUserId, isPro]);
+  }, [params.projectId, sessionUserId, isPro, setActiveSystemId]);
 
   const result = useMemo(() => {
     const parsedPartyLevel = Math.max(1, Number.parseInt(partyLevel || '1', 10));
@@ -266,47 +549,18 @@ export default function EncounterScreen() {
     const parsedControl = Math.max(0, Number.parseInt(controlCount || '0', 10));
     const parsedStriker = Math.max(0, Number.parseInt(strikerCount || '0', 10));
 
-    const partyBudgetBase = parsedPartyLevel * parsedPartySize * 25;
-    const enemyBudgetBase = parsedEnemyLevel * parsedEnemyCount * 25;
-
-    const difficultyMultiplier =
-      difficulty === 'easy'
-        ? 0.75
-        : difficulty === 'standard'
-          ? 1
-          : difficulty === 'hard'
-            ? 1.25
-            : 1.5;
-
-    const enemyRoleMultiplier =
-      enemyRole === 'brute'
-        ? 1.1
-        : enemyRole === 'skirmisher'
-          ? 1
-          : enemyRole === 'controller'
-            ? 1.15
-            : enemyRole === 'artillery'
-              ? 1.2
-              : 1.35;
-
-    const terrainMultiplier =
-      terrainType === 'open'
-        ? 1
-        : terrainType === 'cover-heavy'
-          ? 1.1
-          : terrainType === 'hazardous'
-            ? 1.15
-            : terrainType === 'chokepoint'
-              ? 1.12
-              : 1.08;
-
-    const waveMultiplier = 1 + (parsedWaveCount - 1) * 0.18;
-
+    const multipliers = encounterConfig.multipliers;
+    const partyBudgetBase = parsedPartyLevel * parsedPartySize * multipliers.partyUnitValue;
+    const enemyBudgetBase = parsedEnemyLevel * parsedEnemyCount * multipliers.enemyUnitValue;
+    const difficultyMultiplier = multipliers.difficulty[difficulty];
+    const enemyRoleMultiplier = multipliers.enemyRole[enemyRole];
+    const terrainMultiplier = multipliers.terrain[terrainType];
+    const waveMultiplier = 1 + (parsedWaveCount - 1) * multipliers.waveStep;
     const partyRoleBonus =
-      parsedFrontline * 0.05 +
-      parsedSupport * 0.04 +
-      parsedControl * 0.04 +
-      parsedStriker * 0.03;
+      parsedFrontline * multipliers.partyRoleWeights.frontline +
+      parsedSupport * multipliers.partyRoleWeights.support +
+      parsedControl * multipliers.partyRoleWeights.control +
+      parsedStriker * multipliers.partyRoleWeights.striker;
 
     const adjustedPartyBudget = Math.round(partyBudgetBase * (1 + partyRoleBonus));
     const adjustedEnemyBudget = Math.round(
@@ -316,57 +570,57 @@ export default function EncounterScreen() {
     const delta = adjustedEnemyBudget - adjustedPartyBudget;
     const actionEconomyDelta = parsedEnemyCount - parsedPartySize;
 
-    let verdict = 'Balanced';
-    if (delta <= -60) verdict = 'Under tuned';
-    if (delta >= 50) verdict = 'Dangerous';
-    if (delta >= 140) verdict = 'Boss-tier';
+    let verdict = encounterConfig.verdictLabels.balanced;
+    if (delta <= encounterConfig.verdictThresholds.undertuned) verdict = encounterConfig.verdictLabels.undertuned;
+    if (delta >= encounterConfig.verdictThresholds.dangerous) verdict = encounterConfig.verdictLabels.dangerous;
+    if (delta >= encounterConfig.verdictThresholds.boss) verdict = encounterConfig.verdictLabels.boss;
 
-    let actionEconomyWarning = 'Action economy looks stable.';
+    let actionEconomyWarning = encounterConfig.advice.actionEconomyStable;
     if (actionEconomyDelta >= 3) {
-      actionEconomyWarning = 'Enemies may overwhelm the party through sheer number of turns.';
+      actionEconomyWarning = encounterConfig.advice.actionEconomyHigh;
     } else if (actionEconomyDelta <= -2) {
-      actionEconomyWarning = 'The party may out-action this encounter unless enemies hit very hard.';
+      actionEconomyWarning = encounterConfig.advice.actionEconomyLow;
     }
 
-    let bossSupportRecommendation = 'No special support recommendation.';
+    let bossSupportRecommendation = encounterConfig.advice.bossDefault;
     if (enemyRole === 'boss' && parsedEnemyCount <= 1) {
-      bossSupportRecommendation = 'Add 2–3 support enemies or a second wave so the boss is not focus-fired.';
+      bossSupportRecommendation = encounterConfig.advice.bossSolo;
     } else if (enemyRole === 'boss' && parsedEnemyCount === 2) {
-      bossSupportRecommendation = 'This boss setup is close, but 1 support unit or environmental hazard would help.';
+      bossSupportRecommendation = encounterConfig.advice.bossPair;
     }
 
     const recommendations: string[] = [];
 
     if (terrainType === 'open') {
-      recommendations.push('Open terrain favors straightforward damage races. Add cover or elevation for more tactical play.');
+      recommendations.push(encounterConfig.advice.openTerrain);
     }
     if (terrainType === 'hazardous') {
-      recommendations.push('Hazardous terrain raises pressure. Make sure players have at least one safe lane or fallback zone.');
+      recommendations.push(encounterConfig.advice.hazardousTerrain);
     }
     if (enemyRole === 'artillery') {
-      recommendations.push('Artillery enemies need protection or spacing. Pair them with blockers or chokepoints.');
+      recommendations.push(encounterConfig.advice.artillery);
     }
     if (enemyRole === 'controller') {
-      recommendations.push('Controllers feel strongest when terrain restricts movement or sight lines.');
+      recommendations.push(encounterConfig.advice.controller);
     }
     if (parsedWaveCount >= 2) {
-      recommendations.push('Multi-wave fights benefit from a clear mid-fight escalation trigger.');
+      recommendations.push(encounterConfig.advice.multiWave);
     }
     if (parsedSupport === 0) {
-      recommendations.push('Parties without support can struggle in attrition fights. Consider reducing wave pressure or hazards.');
+      recommendations.push(encounterConfig.advice.noSupport);
     }
     if (parsedFrontline === 0) {
-      recommendations.push('No frontline can make enemy focus fire brutal. Consider more cover or objective-based win conditions.');
+      recommendations.push(encounterConfig.advice.noFrontline);
     }
     if (parsedControl >= 2 && terrainType === 'chokepoint') {
-      recommendations.push('Heavy control with chokepoints can lock players out; keep at least one tactical bypass available.');
+      recommendations.push(encounterConfig.advice.heavyControl);
     }
     if (difficulty === 'deadly' && parsedWaveCount >= 3) {
-      recommendations.push('Deadly multi-wave setups need telegraphed escalation so defeats feel fair rather than abrupt.');
+      recommendations.push(encounterConfig.advice.deadlyMultiWave);
     }
 
     if (recommendations.length === 0) {
-      recommendations.push('This setup is broadly playable. Tune enemy damage or terrain for final feel.');
+      recommendations.push(encounterConfig.advice.default);
     }
 
     const seed = buildSeed(
@@ -384,24 +638,8 @@ export default function EncounterScreen() {
       ].join('|')
     );
 
-    const tacticalBeats = pickManyFromPool(
-      [
-        'Enemy reinforcements arrive when a battlefield objective is touched.',
-        'A destructible cover piece can be used by either side for advantage.',
-        'The objective moves mid-fight, forcing both teams to reposition.',
-        'The party can disable one major hazard with a skill challenge.',
-        'A neutral creature can be convinced to intervene for one round.',
-        'Retreat lanes open after round three, creating a split decision.',
-        'An enemy lieutenant retreats to trigger traps in a fallback zone.',
-        'A weather shift alters visibility and ranged pressure mid-fight.',
-        'A civilian or relic target appears in danger and changes priorities.',
-        'Victory requires securing two map points rather than only defeating foes.',
-        'One enemy unit can be turned by dialogue if isolated from the commander.',
-        'Each wave arrives with a new terrain constraint and tactical opportunity.',
-      ],
-      2,
-      seed + 13
-    );
+    const tacticalBeats = pickManyFromPool(encounterConfig.tacticalBeatPool, 2, seed + 13);
+    const lineupIdeas = pickManyFromPool(encounterConfig.lineupIdeas[enemyRole], 2, seed + 23);
 
     return {
       partyBudgetBase,
@@ -414,6 +652,7 @@ export default function EncounterScreen() {
       actionEconomyWarning,
       bossSupportRecommendation,
       recommendations,
+      lineupIdeas,
       tacticalBeats,
     };
   }, [
@@ -431,6 +670,7 @@ export default function EncounterScreen() {
     strikerCount,
     encounterNotes,
     variationSeed,
+    encounterConfig,
   ]);
 
   function buildPayload() {
@@ -448,8 +688,119 @@ export default function EncounterScreen() {
       controlCount: Number.parseInt(controlCount || '0', 10),
       strikerCount: Number.parseInt(strikerCount || '0', 10),
       encounterNotes,
+      threatTitle,
+      threatStatus,
+      threatClockFilled: Number.parseInt(threatClockFilled || '0', 10),
+      threatClockTotal: Number.parseInt(threatClockTotal || '0', 10),
+      linkedNpcId,
+      linkedNpcName: selectedNpc?.name ?? '',
+      linkedFaction,
+      escalationTag,
+      sessionFallout,
+      systemId: effectiveSystemId,
+      systemName: effectiveSystem.label,
       variationSeed,
       result,
+    };
+  }
+
+  function buildEncounterLedgerEntry(projectId: string, projectName: string): DndEncounterLedgerEntry | null {
+    if (effectiveSystemId !== 'dnd5e') {
+      return null;
+    }
+
+    return {
+      id: `encounter-ledger-${projectId}`,
+      sourceProjectId: projectId,
+      projectName,
+      savedAt: new Date().toISOString(),
+      difficulty: encounterConfig.difficultyLabels[difficulty],
+      enemyRole: encounterConfig.enemyRoleLabels[enemyRole],
+      terrainType: encounterConfig.terrainLabels[terrainType],
+      verdict: result.verdict,
+      partyLevel: Number.parseInt(partyLevel || '1', 10),
+      partySize: Number.parseInt(partySize || '1', 10),
+      monsterBench: dndCampaignContext
+        ? dndCampaignContext.monsterBench[enemyRole].map((monster) => `${monster.name} (${monster.challenge})`)
+        : [],
+      lineupIdeas: result.lineupIdeas,
+      tacticalBeats: result.tacticalBeats,
+      notes: encounterNotes.trim(),
+    };
+  }
+
+  function buildThreatClockEntry(projectId: string, projectName: string): DndThreatClockEntry | null {
+    if (effectiveSystemId !== 'dnd5e') {
+      return null;
+    }
+
+    const recommendedClock = getRecommendedThreatClock(difficulty);
+    const segmentsTotal = Math.max(1, Number.parseInt(threatClockTotal || String(recommendedClock.total), 10));
+    const segmentsFilled = Math.min(
+      segmentsTotal,
+      Math.max(0, Number.parseInt(threatClockFilled || String(recommendedClock.filled), 10))
+    );
+    const roleLabel = encounterConfig.enemyRoleLabels[enemyRole];
+    const fallbackTitle = dndCampaignContext?.currentObjective
+      ? `${roleLabel} pressure around ${dndCampaignContext.currentObjective}`
+      : `${roleLabel} threat`;
+
+    return {
+      id: `threat-clock-${projectId}`,
+      sourceProjectId: projectId,
+      projectName,
+      title: threatTitle.trim() || fallbackTitle,
+      status: threatStatus,
+      segmentsFilled,
+      segmentsTotal,
+      linkedNpcId,
+      linkedNpcName: selectedNpc?.name ?? '',
+      linkedFaction: linkedFaction.trim(),
+      escalationTag: escalationTag.trim(),
+      difficulty: encounterConfig.difficultyLabels[difficulty],
+      enemyRole: roleLabel,
+      verdict: result.verdict,
+      fallout: sessionFallout.trim(),
+      latestBeat: result.tacticalBeats[0] ?? '',
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  async function syncEncounterLedger(projectId: string, projectName: string) {
+    if (!supabase || !sessionUserId || !selectedCampaignId) {
+      return { synced: false, error: null as string | null };
+    }
+
+    const encounterEntry = buildEncounterLedgerEntry(projectId, projectName);
+    const threatEntry = buildThreatClockEntry(projectId, projectName);
+    const errors: string[] = [];
+    let synced = false;
+
+    if (encounterEntry) {
+      try {
+        await syncDndEncounterLedgerEntry(supabase, sessionUserId, selectedCampaignId, encounterEntry);
+        synced = true;
+      } catch (error) {
+        errors.push(`encounter ledger: ${getErrorMessage(error)}`);
+      }
+    }
+
+    if (threatEntry) {
+      try {
+        await syncDndThreatClockEntry(supabase, sessionUserId, selectedCampaignId, threatEntry);
+        synced = true;
+      } catch (error) {
+        errors.push(`threat clock: ${getErrorMessage(error)}`);
+      }
+    }
+
+    if (synced) {
+      await refreshSelectedCampaignData();
+    }
+
+    return {
+      synced,
+      error: errors.length > 0 ? errors.join(' ') : null,
     };
   }
 
@@ -467,8 +818,9 @@ export default function EncounterScreen() {
     try {
       setSaving(true);
 
-      const payload = buildPayload();
+      const payload = applyCampaignSystemToPayload(buildPayload(), selectedCampaign);
       const timestampName = `Encounter - ${new Date().toLocaleString()}`;
+      const campaignMessage = selectedCampaign ? ` in ${selectedCampaign.name}` : '';
 
       if (!asNew && currentProjectId) {
         const { error } = await supabase
@@ -477,7 +829,7 @@ export default function EncounterScreen() {
             name: loadedProjectName ?? timestampName,
             data: payload,
             updated_at: new Date().toISOString(),
-            campaign_id: null,
+            campaign_id: selectedCampaignId || null,
           })
           .eq('id', currentProjectId)
           .eq('user_id', sessionUserId);
@@ -487,9 +839,13 @@ export default function EncounterScreen() {
           return;
         }
 
+        const ledgerSync = await syncEncounterLedger(currentProjectId, loadedProjectName ?? timestampName);
         await refreshAppState();
-        setSelectedCampaignId('');
-        setBanner('success', 'Updated', 'Your encounter project was updated successfully.');
+        setBanner(
+          ledgerSync.error ? 'info' : 'success',
+          ledgerSync.error ? 'Updated, campaign sync pending' : 'Updated',
+          `Your encounter project was updated successfully${campaignMessage}.${ledgerSync.synced ? ' Campaign board synced.' : ''}${ledgerSync.error ? ` Campaign sync failed: ${ledgerSync.error}` : ''}`
+        );
         return;
       }
 
@@ -513,7 +869,7 @@ export default function EncounterScreen() {
           name: timestampName,
           tool_type: 'encounter_calculator',
           data: payload,
-          campaign_id: null,
+          campaign_id: selectedCampaignId || null,
         })
         .select()
         .single();
@@ -525,10 +881,14 @@ export default function EncounterScreen() {
 
       setLoadedProjectName(data?.name ?? timestampName);
       setCurrentProjectId(data?.id ?? null);
-      setSelectedCampaignId('');
+      const ledgerSync = data?.id ? await syncEncounterLedger(data.id, data.name ?? timestampName) : { synced: false, error: null as string | null };
       await refreshAppState();
 
-      setBanner('info', 'Saved', 'Your encounter project was saved successfully.');
+      setBanner(
+        ledgerSync.error ? 'info' : 'success',
+        ledgerSync.error ? 'Saved, campaign sync pending' : 'Saved',
+        `Your encounter project was saved successfully${campaignMessage}.${ledgerSync.synced ? ' Campaign board synced.' : ''}${ledgerSync.error ? ` Campaign sync failed: ${ledgerSync.error}` : ''}`
+      );
     } finally {
       setSaving(false);
     }
@@ -562,7 +922,7 @@ export default function EncounterScreen() {
     try {
       setSaving(true);
 
-      const payload = buildPayload();
+      const payload = applyCampaignSystemToPayload(buildPayload(), selectedCampaign);
       const timestampName = loadedProjectName ?? `Encounter - ${new Date().toLocaleString()}`;
 
       if (currentProjectId) {
@@ -582,8 +942,13 @@ export default function EncounterScreen() {
           return;
         }
 
+        const ledgerSync = await syncEncounterLedger(currentProjectId, timestampName);
         await refreshAppState();
-        setBanner('success', 'Campaign updated', 'This project is now linked to the selected campaign.');
+        setBanner(
+          ledgerSync.error ? 'info' : 'success',
+          ledgerSync.error ? 'Campaign updated, sync pending' : 'Campaign updated',
+          `This project is now linked to the selected campaign.${ledgerSync.synced ? ' Campaign board synced.' : ''}${ledgerSync.error ? ` Campaign sync failed: ${ledgerSync.error}` : ''}`
+        );
         return;
       }
 
@@ -606,9 +971,14 @@ export default function EncounterScreen() {
 
       setLoadedProjectName(data?.name ?? timestampName);
       setCurrentProjectId(data?.id ?? null);
+      const ledgerSync = data?.id ? await syncEncounterLedger(data.id, data.name ?? timestampName) : { synced: false, error: null as string | null };
       await refreshAppState();
 
-      setBanner('success', 'Added to campaign', 'This project was saved into the selected campaign.');
+      setBanner(
+        ledgerSync.error ? 'info' : 'success',
+        ledgerSync.error ? 'Added to campaign, sync pending' : 'Added to campaign',
+        `This project was saved into the selected campaign.${ledgerSync.synced ? ' Campaign board synced.' : ''}${ledgerSync.error ? ` Campaign sync failed: ${ledgerSync.error}` : ''}`
+      );
     } finally {
       setSaving(false);
     }
@@ -616,12 +986,29 @@ export default function EncounterScreen() {
 
   return (
     <Screen>
-      <Card>
-        <Heading>Encounter Builder</Heading>
-        <BodyText>
-          Build fights with party roles, enemy behavior, terrain pressure, wave structure, and campaign context in mind.
-        </BodyText>
-      </Card>
+      <SystemHero
+        systemId={effectiveSystemId}
+        eyebrow={effectiveSystem.shortLabel}
+        title={effectiveSystem.encounters.title}
+        body={effectiveSystem.encounters.description}
+        chips={[
+          encounterConfig.difficultyLabels[difficulty],
+          encounterConfig.enemyRoleLabels[enemyRole],
+          dndCampaignContext
+            ? dndCampaignContext.partySize > 0
+              ? `${dndCampaignContext.partySize}-PC party`
+              : encounterConfig.terrainLabels[terrainType]
+            : encounterConfig.terrainLabels[terrainType],
+          selectedCampaign ? `Campaign: ${selectedCampaign.name}` : 'Standalone battle plan',
+        ]}
+      >
+        {loadedProjectName ? (
+          <View style={styles.heroMetaRow}>
+            <Label style={styles.heroMetaLabel}>Loaded project</Label>
+            <BodyText>{loadedProjectName}</BodyText>
+          </View>
+        ) : null}
+      </SystemHero>
 
       {statusBanner ? (
         <StatusBanner
@@ -640,20 +1027,20 @@ export default function EncounterScreen() {
       />
 
       {loadingProject ? (
-        <Card>
+        <SystemPanel systemId={effectiveSystemId} tone="muted">
           <View style={styles.sessionRow}>
             <ActivityIndicator />
             <BodyText>Loading saved project...</BodyText>
           </View>
-        </Card>
+        </SystemPanel>
       ) : loadedProjectName ? (
-        <Card>
+        <SystemPanel systemId={effectiveSystemId} tone="muted">
           <Label>Loaded project</Label>
           <BodyText>{loadedProjectName}</BodyText>
-        </Card>
+        </SystemPanel>
       ) : null}
 
-      <Card>
+      <SystemPanel systemId={effectiveSystemId} tone="accent">
         <Label>Campaign Link</Label>
 
         {!isPro ? (
@@ -665,23 +1052,11 @@ export default function EncounterScreen() {
               </BodyText>
             </View>
 
-            <View style={styles.lockedPillRow}>
-              <View style={[styles.pill, styles.lockedPill]}>
-                <BodyText style={styles.lockedPillText}>none</BodyText>
-              </View>
-              <View style={[styles.pill, styles.lockedPill]}>
-                <BodyText style={styles.lockedPillText}>Campaign Alpha</BodyText>
-              </View>
-              <View style={[styles.pill, styles.lockedPill]}>
-                <BodyText style={styles.lockedPillText}>Boss Arc</BodyText>
-              </View>
-            </View>
-
             <BodyText style={styles.proLockedHint}>
               {campaignLinkUpsell.message}
             </BodyText>
 
-            <Pressable onPress={handleUpgradePress} style={styles.inlineUpgradeButton}>
+            <Pressable onPress={handleUpgradePress} style={[styles.inlineUpgradeButton, { backgroundColor: palette.accent }]}>
               <Label style={styles.inlineUpgradeButtonText}>{campaignLinkUpsell.buttonLabel}</Label>
             </Pressable>
           </View>
@@ -693,8 +1068,11 @@ export default function EncounterScreen() {
         ) : campaignOptions.length > 0 ? (
           <View style={styles.pillRow}>
             <Pressable
-              onPress={() => setSelectedCampaignId('')}
-              style={[styles.pill, selectedCampaignId === '' && styles.pillSelected]}
+              onPress={() => {
+                setSelectedCampaignId('');
+                setLockedCampaignSystemId(null);
+              }}
+              style={[styles.pill, selectedCampaignId === '' && { backgroundColor: palette.accent, borderColor: palette.accent }]}
             >
               <BodyText style={selectedCampaignId === '' ? styles.pillTextSelected : undefined}>
                 none
@@ -707,11 +1085,15 @@ export default function EncounterScreen() {
               return (
                 <Pressable
                   key={campaign.id}
-                  onPress={() => setSelectedCampaignId(campaign.id)}
-                  style={[styles.pill, selected && styles.pillSelected]}
+                  onPress={() => {
+                    setSelectedCampaignId(campaign.id);
+                    setLockedCampaignSystemId(campaign.systemId);
+                    setActiveSystemId(campaign.systemId);
+                  }}
+                  style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
                 >
                   <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                    {campaign.name}
+                    {campaign.name} • {campaign.systemShortLabel}
                   </BodyText>
                 </Pressable>
               );
@@ -721,145 +1103,340 @@ export default function EncounterScreen() {
           <BodyText>No saved campaigns yet. Create one in Campaign Hub to link this project.</BodyText>
         )}
 
-        <Label>Party Level</Label>
+        {selectedCampaign ? (
+          <BodyText>Ruleset locked to {selectedCampaign.systemName} while linked to {selectedCampaign.name}.</BodyText>
+        ) : null}
+
+        {dndCampaignContext ? (
+          <View style={styles.resultRow}>
+            <BodyText>
+              Imported from campaign: {dndCampaignContext.partySize} hero sheets, average level{' '}
+              {dndCampaignContext.averageLevel ?? 'n/a'}.
+            </BodyText>
+            <BodyText>
+              Role mix: {dndCampaignContext.roleMix.frontline} front line, {dndCampaignContext.roleMix.support} support,{' '}
+              {dndCampaignContext.roleMix.control} arcane control, {dndCampaignContext.roleMix.striker} scouts/strikers.
+            </BodyText>
+          </View>
+        ) : null}
+
+        <Label>{encounterConfig.labels.partyLevel}</Label>
         <AppInput
           value={partyLevel}
           onChangeText={setPartyLevel}
           keyboardType="numeric"
-          placeholder="3"
+          placeholder={encounterConfig.defaults.partyLevel}
         />
 
-        <Label>Party Size</Label>
+        <Label>{encounterConfig.labels.partySize}</Label>
         <AppInput
           value={partySize}
           onChangeText={setPartySize}
           keyboardType="numeric"
-          placeholder="4"
+          placeholder={encounterConfig.defaults.partySize}
         />
 
-        <Label>Party Role Mix</Label>
+        <Label>{encounterConfig.labels.partyRoleMix}</Label>
         <View style={styles.gridRow}>
           <View style={styles.gridItem}>
-            <Label>Frontline</Label>
+            <Label>{encounterConfig.labels.frontline}</Label>
             <AppInput value={frontlineCount} onChangeText={setFrontlineCount} keyboardType="numeric" />
           </View>
           <View style={styles.gridItem}>
-            <Label>Support</Label>
+            <Label>{encounterConfig.labels.support}</Label>
             <AppInput value={supportCount} onChangeText={setSupportCount} keyboardType="numeric" />
           </View>
           <View style={styles.gridItem}>
-            <Label>Control</Label>
+            <Label>{encounterConfig.labels.control}</Label>
             <AppInput value={controlCount} onChangeText={setControlCount} keyboardType="numeric" />
           </View>
           <View style={styles.gridItem}>
-            <Label>Striker</Label>
+            <Label>{encounterConfig.labels.striker}</Label>
             <AppInput value={strikerCount} onChangeText={setStrikerCount} keyboardType="numeric" />
           </View>
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Enemy Count</Label>
+      {dndCampaignContext ? (
+        <SystemPanel systemId={effectiveSystemId}>
+          <Label>Linked Party Readiness</Label>
+          <View style={styles.resultRow}>
+            {dndCampaignContext.partySummaryLines.length > 0 ? (
+              dndCampaignContext.partySummaryLines.map((entry, index) => (
+                <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+              ))
+            ) : (
+              <BodyText>No party sheets are logged in this campaign yet.</BodyText>
+            )}
+            <BodyText>{dndCampaignContext.treasurySummary}</BodyText>
+            {dndCampaignContext.attunementItems.length > 0 ? (
+              <BodyText>Attunement pressure: {dndCampaignContext.attunementItems.join(', ')}.</BodyText>
+            ) : null}
+            {dndCampaignContext.consumableItems.length > 0 ? (
+              <BodyText>Consumables on hand: {dndCampaignContext.consumableItems.join(', ')}.</BodyText>
+            ) : null}
+          </View>
+        </SystemPanel>
+      ) : null}
+
+      {dndCampaignContext ? (
+        <SystemPanel systemId={effectiveSystemId}>
+          <Label>Campaign Threat Board</Label>
+          <View style={styles.resultRow}>
+            {dndCampaignContext.threatSummaryLines.length > 0 ? (
+              dndCampaignContext.threatSummaryLines.map((entry, index) => (
+                <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+              ))
+            ) : (
+              <BodyText>No active threat clocks are logged for this campaign yet.</BodyText>
+            )}
+          </View>
+        </SystemPanel>
+      ) : null}
+
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{encounterConfig.labels.enemyCount}</Label>
         <AppInput
           value={enemyCount}
           onChangeText={setEnemyCount}
           keyboardType="numeric"
-          placeholder="4"
+          placeholder={encounterConfig.defaults.enemyCount}
         />
 
-        <Label>Enemy Level</Label>
+        <Label>{encounterConfig.labels.enemyLevel}</Label>
         <AppInput
           value={enemyLevel}
           onChangeText={setEnemyLevel}
           keyboardType="numeric"
-          placeholder="3"
+          placeholder={encounterConfig.defaults.enemyLevel}
         />
 
-        <Label>Difficulty Target</Label>
+        <Label>{encounterConfig.labels.difficulty}</Label>
         <View style={styles.pillRow}>
-          {(['easy', 'standard', 'hard', 'deadly'] as Difficulty[]).map((option) => {
+          {DIFFICULTY_OPTIONS.map((option) => {
             const selected = difficulty === option;
 
             return (
               <Pressable
                 key={option}
                 onPress={() => setDifficulty(option)}
-                style={[styles.pill, selected && styles.pillSelected]}
+                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
               >
                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                  {option}
+                  {encounterConfig.difficultyLabels[option]}
                 </BodyText>
               </Pressable>
             );
           })}
         </View>
 
-        <Label>Enemy Role</Label>
+        <Label>{encounterConfig.labels.enemyRole}</Label>
         <View style={styles.pillRow}>
-          {(['brute', 'skirmisher', 'controller', 'artillery', 'boss'] as EnemyRole[]).map((option) => {
+          {ENEMY_ROLE_OPTIONS.map((option) => {
             const selected = enemyRole === option;
 
             return (
               <Pressable
                 key={option}
                 onPress={() => setEnemyRole(option)}
-                style={[styles.pill, selected && styles.pillSelected]}
+                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
               >
                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                  {option}
+                  {encounterConfig.enemyRoleLabels[option]}
                 </BodyText>
               </Pressable>
             );
           })}
         </View>
 
-        <Label>Terrain</Label>
+        <Label>{encounterConfig.labels.terrain}</Label>
         <View style={styles.pillRow}>
-          {(['open', 'cover-heavy', 'hazardous', 'chokepoint', 'elevated'] as TerrainType[]).map((option) => {
+          {TERRAIN_OPTIONS.map((option) => {
             const selected = terrainType === option;
 
             return (
               <Pressable
                 key={option}
                 onPress={() => setTerrainType(option)}
-                style={[styles.pill, selected && styles.pillSelected]}
+                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
               >
                 <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                  {option}
+                  {encounterConfig.terrainLabels[option]}
                 </BodyText>
               </Pressable>
             );
           })}
         </View>
 
-        <Label>Wave Count</Label>
+        <Label>{encounterConfig.labels.waveCount}</Label>
         <AppInput
           value={waveCount}
           onChangeText={setWaveCount}
           keyboardType="numeric"
-          placeholder="1"
+          placeholder={encounterConfig.defaults.waveCount}
         />
 
-        <Label>Encounter Notes</Label>
+        <Label>{encounterConfig.labels.notes}</Label>
         <AppInput
           value={encounterNotes}
           onChangeText={setEncounterNotes}
-          placeholder="Boss opens with roar, reinforcements on turn 3, ritual hazard in center..."
+          placeholder={encounterConfig.labels.notesPlaceholder}
           multiline
         />
         <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
-          <Label style={styles.secondaryButtonText}>Reroll Encounter Beats</Label>
+          <Label style={styles.secondaryButtonText}>{encounterConfig.labels.rerollButton}</Label>
         </Pressable>
+
+        {dndCampaignContext ? (
+          <>
+            <Label>Threat Clock Title</Label>
+            <AppInput
+              value={threatTitle}
+              onChangeText={setThreatTitle}
+              placeholder="Cult reprisals against the river district"
+            />
+
+            <Label>Threat Status</Label>
+            <View style={styles.pillRow}>
+              {THREAT_STATUS_OPTIONS.map((option) => {
+                const selected = threatStatus === option;
+
+                return (
+                  <Pressable
+                    key={option}
+                    onPress={() => setThreatStatus(option)}
+                    style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
+                  >
+                    <BodyText style={selected ? styles.pillTextSelected : undefined}>
+                      {formatThreatClockStatusLabel(option)}
+                    </BodyText>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Label>Threat Pressure</Label>
+            <View style={styles.gridRow}>
+              <View style={styles.gridItem}>
+                <Label>Segments Filled</Label>
+                <AppInput
+                  value={threatClockFilled}
+                  onChangeText={setThreatClockFilled}
+                  keyboardType="numeric"
+                  placeholder={String(getRecommendedThreatClock(difficulty).filled)}
+                />
+              </View>
+              <View style={styles.gridItem}>
+                <Label>Clock Size</Label>
+                <AppInput
+                  value={threatClockTotal}
+                  onChangeText={setThreatClockTotal}
+                  keyboardType="numeric"
+                  placeholder={String(getRecommendedThreatClock(difficulty).total)}
+                />
+              </View>
+            </View>
+
+            <Label>Escalated NPC</Label>
+            <View style={styles.pillRow}>
+              <Pressable
+                onPress={() => setLinkedNpcId('')}
+                style={[styles.pill, linkedNpcId === '' && { backgroundColor: palette.accent, borderColor: palette.accent }]}
+              >
+                <BodyText style={linkedNpcId === '' ? styles.pillTextSelected : undefined}>none</BodyText>
+              </Pressable>
+              {dndCampaignContext.npcRoster.map((npc) => {
+                const selected = linkedNpcId === npc.id;
+
+                return (
+                  <Pressable
+                    key={npc.id}
+                    onPress={() => {
+                      setLinkedNpcId(npc.id);
+                      if (linkedFaction.trim().length === 0 && npc.affiliation.trim().length > 0) {
+                        setLinkedFaction(npc.affiliation);
+                      }
+                    }}
+                    style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
+                  >
+                    <BodyText style={selected ? styles.pillTextSelected : undefined}>{npc.name}</BodyText>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Label>Faction Under Pressure</Label>
+            {factionOptions.length > 0 ? (
+              <View style={styles.pillRow}>
+                {factionOptions.map((option) => {
+                  const selected = linkedFaction === option;
+
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => setLinkedFaction(option)}
+                      style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
+                    >
+                      <BodyText style={selected ? styles.pillTextSelected : undefined}>{option}</BodyText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
+            <AppInput
+              value={linkedFaction}
+              onChangeText={setLinkedFaction}
+              placeholder="Temple of the Dawn, Red Knives, city watch..."
+            />
+
+            <Label>Escalation Tag</Label>
+            <View style={styles.pillRow}>
+              {ESCALATION_TAG_OPTIONS.map((option) => {
+                const selected = escalationTag === option;
+
+                return (
+                  <Pressable
+                    key={option}
+                    onPress={() => setEscalationTag(option)}
+                    style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
+                  >
+                    <BodyText style={selected ? styles.pillTextSelected : undefined}>{option}</BodyText>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Label>Session Fallout</Label>
+            <AppInput
+              value={sessionFallout}
+              onChangeText={setSessionFallout}
+              placeholder="Failure here tips a district into panic, draws a rival cell, or burns a safe route."
+              multiline
+            />
+          </>
+        ) : null}
 
         <View style={styles.saveRow}>
           <View style={styles.actionRow}>
             <Pressable
               onPress={() => handleSaveProject(false)}
               disabled={saving || loadingSession}
-              style={[styles.saveButton, (saving || loadingSession) && styles.saveButtonDisabled]}
+              style={[
+                styles.saveButton,
+                { backgroundColor: palette.accent },
+                (saving || loadingSession) && styles.saveButtonDisabled,
+              ]}
             >
               <Label style={styles.saveButtonText}>
-                {saving ? 'Saving...' : currentProjectId ? 'Update Project' : 'Save Project'}
+                {saving
+                  ? 'Saving...'
+                  : currentProjectId
+                    ? selectedCampaignId
+                      ? 'Update Linked Project'
+                      : 'Update Project'
+                    : selectedCampaignId
+                      ? 'Save to Campaign'
+                      : 'Save Project'}
               </Label>
             </Pressable>
 
@@ -876,15 +1453,16 @@ export default function EncounterScreen() {
               disabled={saving || loadingSession || !isPro || !selectedCampaignId}
               style={[
                 styles.campaignButton,
+                { borderColor: palette.accent },
                 (saving || loadingSession || !isPro || !selectedCampaignId) && styles.saveButtonDisabled,
               ]}
             >
               <Label style={styles.campaignButtonText}>
                 {!isPro
-                  ? 'Add to Campaign'
+                  ? 'Link to Campaign'
                   : currentProjectId && selectedCampaignId
-                    ? 'Update Campaign'
-                    : 'Add to Campaign'}
+                    ? 'Relink Campaign'
+                    : 'Link to Campaign'}
               </Label>
             </Pressable>
           </View>
@@ -897,8 +1475,10 @@ export default function EncounterScreen() {
           ) : sessionUserId ? (
             <BodyText>
               {currentProjectId
-                ? 'Loaded project detected. You can update it, save a new copy, or add it to a campaign.'
-                : 'Signed in. Saving is enabled.'}
+                ? 'Loaded project detected. Save respects the selected campaign automatically, or save a new copy.'
+                : selectedCampaignId
+                  ? 'Signed in. Save Project will use the selected campaign by default.'
+                  : 'Signed in. Saving is enabled.'}
             </BodyText>
           ) : (
             <BodyText>Not signed in. You can calculate, but not save yet.</BodyText>
@@ -913,43 +1493,65 @@ export default function EncounterScreen() {
             />
           ) : null}
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Encounter Assessment</Label>
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{encounterConfig.labels.assessment}</Label>
         <View style={styles.resultRow}>
-          <BodyText>Party budget: {result.adjustedPartyBudget}</BodyText>
-          <BodyText>Enemy budget: {result.adjustedEnemyBudget}</BodyText>
-          <BodyText>Difference: {result.delta}</BodyText>
-          <BodyText>Verdict: {result.verdict}</BodyText>
+          <BodyText>{encounterConfig.labels.partyBudget}: {result.adjustedPartyBudget}</BodyText>
+          <BodyText>{encounterConfig.labels.enemyBudget}: {result.adjustedEnemyBudget}</BodyText>
+          <BodyText>{encounterConfig.labels.difference}: {result.delta}</BodyText>
+          <BodyText>{encounterConfig.labels.verdict}: {result.verdict}</BodyText>
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Practical Warnings</Label>
+      {dndCampaignContext ? (
+        <SystemPanel systemId={effectiveSystemId}>
+          <Label>Monster Bench</Label>
+          <View style={styles.resultRow}>
+            {dndCampaignContext.monsterBench[enemyRole].map((monster) => (
+              <BodyText key={monster.name}>
+                • {monster.name} ({monster.challenge}) - AC {monster.armorClass}, HP {monster.hitPoints}, {monster.signature}
+              </BodyText>
+            ))}
+          </View>
+        </SystemPanel>
+      ) : null}
+
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{encounterConfig.labels.warnings}</Label>
         <View style={styles.resultRow}>
           <BodyText>{result.actionEconomyWarning}</BodyText>
           <BodyText>{result.bossSupportRecommendation}</BodyText>
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Builder Notes</Label>
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{encounterConfig.labels.builderNotes}</Label>
         <View style={styles.resultRow}>
           {result.recommendations.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </Card>
+      </SystemPanel>
 
-      <Card>
-        <Label>Tactical Beat Ideas</Label>
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{encounterConfig.labels.lineupIdeas}</Label>
+        <View style={styles.resultRow}>
+          {result.lineupIdeas.map((entry, index) => (
+            <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+          ))}
+        </View>
+      </SystemPanel>
+
+      <SystemPanel systemId={effectiveSystemId}>
+        <Label>{encounterConfig.labels.tacticalBeats}</Label>
         <View style={styles.resultRow}>
           {result.tacticalBeats.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </Card>
+      </SystemPanel>
     </Screen>
   );
 }
@@ -959,6 +1561,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.sm,
     flexWrap: 'wrap',
+  },
+  heroMetaRow: {
+    gap: 4,
+    paddingTop: Spacing.xs,
+  },
+  heroMetaLabel: {
+    color: Colors.text,
   },
   pill: {
     backgroundColor: Colors.elevated,
