@@ -6,6 +6,7 @@ import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Label } from '@/components/AppText';
 import { DndCampaignWorkbench } from '@/components/DndCampaignWorkbench';
+import { DisclosurePanel } from '@/components/DisclosurePanel';
 import { GameSystemPicker } from '@/components/GameSystemPicker';
 import { RulesetIdentityCard } from '@/components/RulesetIdentityCard';
 import { Screen } from '@/components/Screen';
@@ -134,6 +135,8 @@ export default function CampaignScreen() {
     const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
     const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
+    const [storyNotesOpen, setStoryNotesOpen] = useState(false);
+    const [moreSaveActionsOpen, setMoreSaveActionsOpen] = useState(false);
 
     const [linkedProjects, setLinkedProjects] = useState<LinkedProject[]>([]);
     const [loadingLinks, setLoadingLinks] = useState(false);
@@ -220,6 +223,8 @@ export default function CampaignScreen() {
         setTreasureLedger([]);
         setThreatClocks([]);
         setTreasuryAwards([]);
+        setStoryNotesOpen(false);
+        setMoreSaveActionsOpen(false);
     }, [campaignConfig, params.projectId, currentProjectId]);
 
     useEffect(() => {
@@ -363,6 +368,54 @@ export default function CampaignScreen() {
         };
     }, [campaignName, activeSystem.label, tone, levelBand, partyName, mainFaction, campaignSummary, currentObjective, sessionNotes, variationSeed, campaignConfig]);
 
+    const setupSummary = [
+        campaignName.trim() || campaignConfig.defaults.campaignName,
+        campaignConfig.toneLabels[tone],
+        levelBand.trim() || campaignConfig.defaults.levelBand,
+    ].join(' • ');
+
+    const storyNotesSummary = [
+        partyName.trim() || activeSystem.campaign.groupPlaceholder,
+        mainFaction.trim() || 'No main faction yet',
+        currentObjective.trim().length > 0 ? 'Objective ready' : 'No objective yet',
+    ].join(' • ');
+
+    const savePanelSummary = currentProjectId
+        ? 'Saving updates the loaded campaign binder.'
+        : 'The next save creates this campaign binder.';
+
+    const saveHelperText = loadingSession
+        ? 'Checking account...'
+        : sessionUserId
+            ? currentProjectId
+                ? 'Loaded campaign detected. Save updates it by default, or open more options for a fresh copy.'
+                : 'Signed in. Campaign binder is ready.'
+            : 'Not signed in. You can plan, but not save yet.';
+
+    const linkedProjectsSummary = currentProjectId
+        ? loadingLinks
+            ? 'Loading attached saves...'
+            : linkedProjects.length > 0
+                ? `${linkedProjects.length} saved prep entries are attached to this campaign.`
+                : 'No saved prep is attached to this campaign yet.'
+        : 'Save this campaign first to start attaching prep.';
+    const escalationSummary =
+        escalationWatch.npcLines.length + escalationWatch.factionLines.length > 0
+            ? `${escalationWatch.npcLines.length + escalationWatch.factionLines.length} pressure lines are active.`
+            : 'No NPC or faction pressure has been marked yet.';
+    const threatClockSummary = threatClocks.length > 0
+        ? `${threatClocks.length} live threat clocks are on the board.`
+        : 'No threat clocks have been pushed in yet.';
+    const encounterLedgerSummary = encounterLedger.length > 0
+        ? `${encounterLedger.length} encounter plans have written back into this campaign.`
+        : 'No encounter plans have written back into this campaign yet.';
+    const treasureLedgerSummary = treasureLedger.length > 0
+        ? `${treasureLedger.length} treasure awards have written back into this campaign.`
+        : 'No treasure awards have written back into this campaign yet.';
+    const treasuryAwardsSummary = treasuryAwards.length > 0
+        ? `${treasuryAwards.length} coin awards have been posted into the treasury.`
+        : 'No generated coin awards have been posted yet.';
+
     const lockedPreview = useMemo(() => {
         if (activeSystemId === 'dnd5e') {
             return {
@@ -371,17 +424,6 @@ export default function CampaignScreen() {
                     'Party sheets with species, class, level, AC, HP, passive Perception, and signature gear.',
                     'Shared inventory, treasury, attunement pressure, and named NPC tracking inside one binder.',
                     'SRD-safe species, class, weapon, armor, item, and monster benches baked into the campaign.',
-                ],
-            };
-        }
-
-        if (activeSystemId === 'pathfinder2e') {
-            return {
-                label: 'What this PF2e campaign unlocks',
-                highlights: [
-                    'Scenario prep built around pressure, factions, tactical pacing, and saved campaign context.',
-                    'A campaign hub that keeps encounter prep, rewards, and adventure beats aligned to one game.',
-                    'A cleaner set of saved prep so the campaign keeps one authored voice throughout.',
                 ],
             };
         }
@@ -639,10 +681,17 @@ export default function CampaignScreen() {
                 <SystemPanel systemId={activeSystemId} tone="muted">
                     <Label>Loaded campaign</Label>
                     <BodyText>{loadedProjectName}</BodyText>
+                    <BodyText>Save now updates this campaign binder by default.</BodyText>
                 </SystemPanel>
             ) : null}
 
-            <SystemPanel systemId={activeSystemId} tone="accent">
+            <DisclosurePanel
+                systemId={activeSystemId}
+                tone="accent"
+                title="Campaign Setup"
+                summary={setupSummary}
+                defaultOpen
+            >
                 <GameSystemPicker
                     value={activeSystemId}
                     onChange={setActiveSystemId}
@@ -691,7 +740,15 @@ export default function CampaignScreen() {
                     onChangeText={setMainFaction}
                     placeholder={campaignConfig.defaults.mainFaction}
                 />
+            </DisclosurePanel>
 
+            <DisclosurePanel
+                systemId={activeSystemId}
+                title="Story Notes"
+                summary={storyNotesSummary}
+                open={storyNotesOpen}
+                onOpenChange={setStoryNotesOpen}
+            >
                 <Label>{campaignConfig.labels.summary}</Label>
                 <AppInput
                     value={campaignSummary}
@@ -715,26 +772,39 @@ export default function CampaignScreen() {
                     placeholder={activeSystem.campaign.notesPlaceholder}
                     multiline
                 />
+
                 <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
                     <Label style={styles.secondaryButtonText}>{campaignConfig.labels.rerollButton}</Label>
                 </Pressable>
+            </DisclosurePanel>
 
-                <View style={styles.saveRow}>
+            <SystemPanel systemId={activeSystemId} tone="accent">
+                <Label>Save</Label>
+                <BodyText>{savePanelSummary}</BodyText>
+
+                <Pressable
+                    onPress={() => handleSaveProject(false)}
+                    disabled={saving || loadingSession}
+                    style={[
+                        styles.saveButton,
+                        styles.primaryActionButton,
+                        { backgroundColor: palette.accent },
+                        (saving || loadingSession) && styles.saveButtonDisabled,
+                    ]}
+                >
+                    <Label style={styles.saveButtonText}>
+                        {saving ? 'Saving...' : currentProjectId ? 'Update Campaign' : 'Save Campaign'}
+                    </Label>
+                </Pressable>
+
+                <Pressable onPress={() => setMoreSaveActionsOpen((value) => !value)} style={styles.moreActionsButton}>
+                    <Label style={styles.moreActionsButtonText}>
+                        {moreSaveActionsOpen ? 'Hide more save options' : 'More save options'}
+                    </Label>
+                </Pressable>
+
+                {moreSaveActionsOpen ? (
                     <View style={styles.actionRow}>
-                        <Pressable
-                            onPress={() => handleSaveProject(false)}
-                            disabled={saving || loadingSession}
-                            style={[
-                                styles.saveButton,
-                                { backgroundColor: palette.accent },
-                                (saving || loadingSession) && styles.saveButtonDisabled,
-                            ]}
-                        >
-                            <Label style={styles.saveButtonText}>
-                                {saving ? 'Saving...' : currentProjectId ? 'Update Campaign' : 'Save Campaign'}
-                            </Label>
-                        </Pressable>
-
                         <Pressable
                             onPress={handleSaveAsNew}
                             disabled={saving || loadingSession || !sessionUserId}
@@ -743,22 +813,16 @@ export default function CampaignScreen() {
                             <Label style={styles.secondaryButtonText}>Save As New</Label>
                         </Pressable>
                     </View>
+                ) : null}
 
-                    {loadingSession ? (
-                        <View style={styles.sessionRow}>
-                            <ActivityIndicator />
-                            <BodyText>Checking account...</BodyText>
-                        </View>
-                    ) : sessionUserId ? (
-                        <BodyText>
-                            {currentProjectId
-                                ? 'Loaded campaign detected. You can update it or save a new copy.'
-                                : 'Signed in. Campaign binder is ready.'}
-                        </BodyText>
-                    ) : (
-                        <BodyText>Not signed in. You can plan, but not save yet.</BodyText>
-                    )}
-                </View>
+                {loadingSession ? (
+                    <View style={styles.sessionRow}>
+                        <ActivityIndicator />
+                        <BodyText>Checking account...</BodyText>
+                    </View>
+                ) : (
+                    <BodyText>{saveHelperText}</BodyText>
+                )}
             </SystemPanel>
 
             {activeSystemId === 'dnd5e' ? (
@@ -776,8 +840,11 @@ export default function CampaignScreen() {
             ) : null}
 
             {activeSystemId === 'dnd5e' ? (
-                <SystemPanel systemId={activeSystemId}>
-                    <Label>Escalation Watch</Label>
+                <DisclosurePanel
+                    systemId={activeSystemId}
+                    title="Escalation Watch"
+                    summary={escalationSummary}
+                >
                     <View style={styles.resultRow}>
                         {escalationWatch.npcLines.length > 0 ? (
                             escalationWatch.npcLines.map((entry, index) => (
@@ -793,12 +860,15 @@ export default function CampaignScreen() {
                             <BodyText>No NPC or faction pressure has been marked from saved encounters yet.</BodyText>
                         ) : null}
                     </View>
-                </SystemPanel>
+                </DisclosurePanel>
             ) : null}
 
             {activeSystemId === 'dnd5e' ? (
-                <SystemPanel systemId={activeSystemId}>
-                    <Label>Active Threat Clocks</Label>
+                <DisclosurePanel
+                    systemId={activeSystemId}
+                    title="Active Threat Clocks"
+                    summary={threatClockSummary}
+                >
                     <View style={styles.resultRow}>
                         {threatClocks.length > 0 ? (
                             threatClocks.map((entry) => (
@@ -820,12 +890,15 @@ export default function CampaignScreen() {
                             <BodyText>No threat clocks have been pushed in from saved encounters yet.</BodyText>
                         )}
                     </View>
-                </SystemPanel>
+                </DisclosurePanel>
             ) : null}
 
             {activeSystemId === 'dnd5e' ? (
-                <SystemPanel systemId={activeSystemId}>
-                    <Label>Recent Encounter Ledger</Label>
+                <DisclosurePanel
+                    systemId={activeSystemId}
+                    title="Recent Encounter Ledger"
+                    summary={encounterLedgerSummary}
+                >
                     <View style={styles.resultRow}>
                         {encounterLedger.length > 0 ? (
                             encounterLedger.map((entry) => (
@@ -849,12 +922,15 @@ export default function CampaignScreen() {
                             <BodyText>No encounter plans have written back into this campaign yet.</BodyText>
                         )}
                     </View>
-                </SystemPanel>
+                </DisclosurePanel>
             ) : null}
 
             {activeSystemId === 'dnd5e' ? (
-                <SystemPanel systemId={activeSystemId}>
-                    <Label>Recent Treasure Ledger</Label>
+                <DisclosurePanel
+                    systemId={activeSystemId}
+                    title="Recent Treasure Ledger"
+                    summary={treasureLedgerSummary}
+                >
                     <View style={styles.resultRow}>
                         {treasureLedger.length > 0 ? (
                             treasureLedger.map((entry) => (
@@ -879,12 +955,15 @@ export default function CampaignScreen() {
                             <BodyText>No treasure awards have written back into this campaign yet.</BodyText>
                         )}
                     </View>
-                </SystemPanel>
+                </DisclosurePanel>
             ) : null}
 
             {activeSystemId === 'dnd5e' ? (
-                <SystemPanel systemId={activeSystemId}>
-                    <Label>Recent Coin Awards</Label>
+                <DisclosurePanel
+                    systemId={activeSystemId}
+                    title="Recent Coin Awards"
+                    summary={treasuryAwardsSummary}
+                >
                     <View style={styles.resultRow}>
                         {treasuryAwards.length > 0 ? (
                             treasuryAwards.map((entry) => (
@@ -899,11 +978,16 @@ export default function CampaignScreen() {
                             <BodyText>No generated coin awards have been posted into the treasury yet.</BodyText>
                         )}
                     </View>
-                </SystemPanel>
+                </DisclosurePanel>
             ) : null}
 
-            <SystemPanel systemId={activeSystemId}>
-                <Label>{campaignConfig.labels.snapshot}</Label>
+            <DisclosurePanel
+                systemId={activeSystemId}
+                tone="accent"
+                title={campaignConfig.labels.snapshot}
+                summary={campaignSnapshot.toneSummary}
+                defaultOpen
+            >
                 <View style={styles.resultRow}>
                     <BodyText>{campaignSnapshot.toneSummary}</BodyText>
                     <BodyText>{campaignConfig.labels.party}: {partyName || 'No party name set'}</BodyText>
@@ -912,62 +996,83 @@ export default function CampaignScreen() {
                     {dndWorkbenchSnapshot ? <BodyText>Tracked items: {dndWorkbenchSnapshot.inventoryCount}</BodyText> : null}
                     {dndWorkbenchSnapshot ? <BodyText>Named NPCs: {dndWorkbenchSnapshot.npcCount}</BodyText> : null}
                 </View>
-            </SystemPanel>
+            </DisclosurePanel>
 
-            <SystemPanel systemId={activeSystemId}>
-                <Label>{campaignConfig.labels.storyFocus}</Label>
+            <DisclosurePanel
+                systemId={activeSystemId}
+                title={campaignConfig.labels.storyFocus}
+                summary={campaignSnapshot.objective}
+            >
                 <View style={styles.resultRow}>
                     <BodyText>{campaignConfig.labels.summaryLead}: {campaignSnapshot.summary}</BodyText>
                     <BodyText>{campaignConfig.labels.objectiveLead}: {campaignSnapshot.objective}</BodyText>
                     <BodyText>{campaignConfig.labels.pulseLead}: {campaignSnapshot.campaignPulse}</BodyText>
                 </View>
-            </SystemPanel>
+            </DisclosurePanel>
 
-            <SystemPanel systemId={activeSystemId}>
-                <Label>{campaignConfig.labels.readiness}</Label>
+            <DisclosurePanel
+                systemId={activeSystemId}
+                title={campaignConfig.labels.readiness}
+                summary={campaignSnapshot.notesState}
+            >
                 <View style={styles.resultRow}>
                     <BodyText>{campaignSnapshot.notesState}</BodyText>
                 </View>
-            </SystemPanel>
+            </DisclosurePanel>
 
-            <SystemPanel systemId={activeSystemId}>
-                <Label>{campaignConfig.labels.prepAngles}</Label>
+            <DisclosurePanel
+                systemId={activeSystemId}
+                title={campaignConfig.labels.prepAngles}
+                summary={campaignSnapshot.prepAngles[0]}
+            >
                 <View style={styles.resultRow}>
                     {campaignSnapshot.prepAngles.map((entry, index) => (
                         <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
                     ))}
                 </View>
-            </SystemPanel>
+            </DisclosurePanel>
 
-            <SystemPanel systemId={activeSystemId}>
-                <Label>{campaignConfig.labels.nextSession}</Label>
+            <DisclosurePanel
+                systemId={activeSystemId}
+                title={campaignConfig.labels.nextSession}
+                summary={campaignSnapshot.sessionLens[0]}
+            >
                 <View style={styles.resultRow}>
                     {campaignSnapshot.sessionLens.map((entry, index) => (
                         <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
                     ))}
                 </View>
-            </SystemPanel>
+            </DisclosurePanel>
 
-            <SystemPanel systemId={activeSystemId}>
-                <Label>{campaignConfig.labels.factionMoves}</Label>
+            <DisclosurePanel
+                systemId={activeSystemId}
+                title={campaignConfig.labels.factionMoves}
+                summary={campaignSnapshot.factionMoves[0]}
+            >
                 <View style={styles.resultRow}>
                     {campaignSnapshot.factionMoves.map((entry, index) => (
                         <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
                     ))}
                 </View>
-            </SystemPanel>
+            </DisclosurePanel>
 
-            <SystemPanel systemId={activeSystemId}>
-                <Label>{campaignConfig.labels.stakes}</Label>
+            <DisclosurePanel
+                systemId={activeSystemId}
+                title={campaignConfig.labels.stakes}
+                summary={campaignSnapshot.stakes[0]}
+            >
                 <View style={styles.resultRow}>
                     {campaignSnapshot.stakes.map((entry, index) => (
                         <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
                     ))}
                 </View>
-            </SystemPanel>
+            </DisclosurePanel>
 
-            <SystemPanel systemId={activeSystemId}>
-                <Label>{campaignConfig.labels.linkedProjects}</Label>
+            <DisclosurePanel
+                systemId={activeSystemId}
+                title={campaignConfig.labels.linkedProjects}
+                summary={linkedProjectsSummary}
+            >
                 {currentProjectId ? (
                     loadingLinks ? (
                         <View style={styles.sessionRow}>
@@ -1011,7 +1116,7 @@ export default function CampaignScreen() {
                     ) : (
                         <BodyText>Save this campaign first, then you can start attaching encounters, treasure, and adventures to it.</BodyText>
                     )}
-            </SystemPanel>
+            </DisclosurePanel>
         </Screen>
     );
 }
@@ -1057,6 +1162,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    primaryActionButton: {
+        alignSelf: 'stretch',
+    },
     saveButtonDisabled: {
         opacity: 0.6,
     },
@@ -1075,6 +1183,14 @@ const styles = StyleSheet.create({
     },
     secondaryButtonText: {
         color: Colors.text,
+    },
+    moreActionsButton: {
+        alignSelf: 'flex-start',
+        paddingVertical: 6,
+    },
+    moreActionsButtonText: {
+        color: Colors.text,
+        opacity: 0.8,
     },
     sessionRow: {
         flexDirection: 'row',

@@ -71,28 +71,6 @@ const SYSTEM_PRESENTATIONS: Record<GameSystemId, SystemPresentation> = {
       chipBorder: '#7c4d24',
     },
   },
-  pathfinder2e: {
-    modeLabel: 'Scenario Planning',
-    posterLabel: 'Campaign Tactics Ledger',
-    heroTags: ['Severity-aware fights', 'Level-banded prep', 'Scenario structure'],
-    panelLabel: 'Scenario Notes',
-    palette: {
-      headerBackground: '#1d1215',
-      headerBorder: '#6a353f',
-      tabBackground: '#170d10',
-      pageTint: '#1a1013',
-      heroSurface: '#26171b',
-      heroBorder: '#7f3f4b',
-      panelSurface: '#191116',
-      panelMuted: '#141016',
-      panelAccent: '#24141a',
-      accent: '#f87171',
-      accentSoft: 'rgba(248, 113, 113, 0.16)',
-      accentText: '#ffe1e1',
-      chipSurface: '#24161a',
-      chipBorder: '#79414c',
-    },
-  },
 };
 
 export function getSystemPresentation(systemId: GameSystemId): SystemPresentation {

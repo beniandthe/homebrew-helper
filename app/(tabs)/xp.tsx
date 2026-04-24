@@ -7,6 +7,7 @@ import { ProCard } from '@/components/ProCard';
 import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Label } from '@/components/AppText';
+import { DisclosurePanel } from '@/components/DisclosurePanel';
 import { Screen } from '@/components/Screen';
 import { SystemHero } from '@/components/SystemHero';
 import { SystemPanel } from '@/components/SystemPanel';
@@ -84,6 +85,8 @@ export default function XpCalculatorScreen() {
   const [progressionNotes, setProgressionNotes] = useState('');
   const [variationSeed, setVariationSeed] = useState(0);
   const [appliedCampaignDefaultsId, setAppliedCampaignDefaultsId] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [moreSaveActionsOpen, setMoreSaveActionsOpen] = useState(false);
 
   const [saving, setSaving] = useState(false);
 
@@ -191,7 +194,15 @@ export default function XpCalculatorScreen() {
     setProgressionNotes('');
     setVariationSeed(0);
     setAppliedCampaignDefaultsId('');
+    setAdvancedOpen(false);
+    setMoreSaveActionsOpen(false);
   }, [xpConfig, params.projectId, currentProjectId]);
+
+  useEffect(() => {
+    if (progressionPreset === 'custom') {
+      setAdvancedOpen(true);
+    }
+  }, [progressionPreset]);
 
   useEffect(() => {
     if (!selectedCampaignId) {
@@ -464,6 +475,52 @@ export default function XpCalculatorScreen() {
     xpConfig,
   ]);
 
+  const campaignPanelSummary = selectedCampaign
+    ? `Locked to ${selectedCampaign.systemShortLabel} inside ${selectedCampaign.name}.`
+    : isPro
+      ? 'Standalone plan. Expand to link this pacing plan into a campaign binder.'
+      : 'Campaign linking is available on Pro.';
+
+  const quickSetupSummary = [
+    xpConfig.presetLabels[progressionPreset],
+    xpConfig.modeLabels[progressionMode],
+    `${levels || xpConfig.defaults.levels} levels`,
+    `${encountersPerLevel || xpConfig.defaults.encountersPerLevel} encounters per level`,
+  ].join(' • ');
+
+  const advancedSummary =
+    progressionPreset === 'custom'
+      ? 'Custom pacing values are active.'
+      : 'Open for raw XP math, curve tuning, and detailed planner notes.';
+
+  const savePanelSummary = currentProjectId
+    ? selectedCampaign
+      ? `Saving updates this plan inside ${selectedCampaign.name}.`
+      : 'Saving updates the current standalone plan.'
+    : selectedCampaign
+      ? `The next save goes straight into ${selectedCampaign.name}.`
+      : 'The next save creates a standalone progression plan.';
+
+  const primarySaveLabel = saving
+    ? 'Saving...'
+    : currentProjectId
+      ? selectedCampaignId
+        ? 'Update Campaign Save'
+        : 'Update Save'
+      : selectedCampaignId
+        ? 'Save to Campaign'
+        : 'Save Plan';
+
+  const saveHelperText = loadingSession
+    ? 'Checking account...'
+    : sessionUserId
+      ? currentProjectId
+        ? 'Save updates this plan by default. Open more options if you want a fresh copy or campaign move.'
+        : selectedCampaignId
+          ? 'Saving will add this plan to the selected campaign by default.'
+          : 'Signed in. Save when the pacing feels right.'
+      : 'Not signed in. You can calculate, but not save yet.';
+
   function buildPayload() {
     return {
       levels: Number.parseInt(levels || '1', 10),
@@ -705,9 +762,12 @@ export default function XpCalculatorScreen() {
         </SystemPanel>
       ) : null}
 
-      <SystemPanel systemId={effectiveSystemId} tone="accent">
-        <Label>Add to Campaign</Label>
-
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        tone="accent"
+        title="Campaign Link"
+        summary={campaignPanelSummary}
+      >
         {!isPro ? (
           <View style={styles.proLockedBlock}>
             <View style={styles.proLockedHeader}>
@@ -791,7 +851,15 @@ export default function XpCalculatorScreen() {
             ) : null}
           </View>
         ) : null}
+      </DisclosurePanel>
 
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        tone="accent"
+        title="Quick Setup"
+        summary={quickSetupSummary}
+        defaultOpen
+      >
         <Label>{xpConfig.labels.preset}</Label>
         <View style={styles.pillRow}>
           {(['slow', 'standard', 'heroic', 'brutal', 'custom'] as ProgressionPreset[]).map((option) => {
@@ -805,6 +873,7 @@ export default function XpCalculatorScreen() {
                     setProgressionPreset('custom');
                     return;
                   }
+
                   applyPreset(option);
                 }}
                 style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
@@ -844,6 +913,22 @@ export default function XpCalculatorScreen() {
           placeholder={xpConfig.defaults.levels}
         />
 
+        <Label>{xpConfig.labels.encountersPerLevel}</Label>
+        <AppInput
+          value={encountersPerLevel}
+          onChangeText={setEncountersPerLevel}
+          keyboardType="numeric"
+          placeholder={xpConfig.defaults.encountersPerLevel}
+        />
+      </DisclosurePanel>
+
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title="Advanced Tuning"
+        summary={advancedSummary}
+        open={advancedOpen}
+        onOpenChange={setAdvancedOpen}
+      >
         <Label>{xpConfig.labels.baseXp}</Label>
         <AppInput
           value={baseXp}
@@ -896,14 +981,6 @@ export default function XpCalculatorScreen() {
           placeholder={xpConfig.defaults.encountersPerSession}
         />
 
-        <Label>{xpConfig.labels.encountersPerLevel}</Label>
-        <AppInput
-          value={encountersPerLevel}
-          onChangeText={setEncountersPerLevel}
-          keyboardType="numeric"
-          placeholder={xpConfig.defaults.encountersPerLevel}
-        />
-
         <Label>{xpConfig.labels.notes}</Label>
         <AppInput
           value={progressionNotes}
@@ -911,34 +988,37 @@ export default function XpCalculatorScreen() {
           placeholder={xpConfig.labels.notesPlaceholder}
           multiline
         />
+
         <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
           <Label style={styles.secondaryButtonText}>{xpConfig.labels.rerollButton}</Label>
         </Pressable>
+      </DisclosurePanel>
 
-        <View style={styles.saveRow}>
+      <SystemPanel systemId={effectiveSystemId} tone="accent">
+        <Label>Save</Label>
+        <BodyText>{savePanelSummary}</BodyText>
+
+        <Pressable
+          onPress={() => handleSaveProject(false)}
+          disabled={saving || loadingSession}
+          style={[
+            styles.saveButton,
+            styles.primaryActionButton,
+            { backgroundColor: palette.accent },
+            (saving || loadingSession) && styles.saveButtonDisabled,
+          ]}
+        >
+          <Label style={styles.saveButtonText}>{primarySaveLabel}</Label>
+        </Pressable>
+
+        <Pressable onPress={() => setMoreSaveActionsOpen((value) => !value)} style={styles.moreActionsButton}>
+          <Label style={styles.moreActionsButtonText}>
+            {moreSaveActionsOpen ? 'Hide more save options' : 'More save options'}
+          </Label>
+        </Pressable>
+
+        {moreSaveActionsOpen ? (
           <View style={styles.actionRow}>
-            <Pressable
-              onPress={() => handleSaveProject(false)}
-              disabled={saving || loadingSession}
-              style={[
-                styles.saveButton,
-                { backgroundColor: palette.accent },
-                (saving || loadingSession) && styles.saveButtonDisabled,
-              ]}
-            >
-              <Label style={styles.saveButtonText}>
-                {saving
-                  ? 'Saving...'
-                  : currentProjectId
-                    ? selectedCampaignId
-                      ? 'Update Campaign Save'
-                      : 'Update Save'
-                    : selectedCampaignId
-                      ? 'Save to Campaign'
-                      : 'Save Plan'}
-              </Label>
-            </Pressable>
-
             <Pressable
               onPress={handleSaveAsNew}
               disabled={saving || loadingSession || !sessionUserId}
@@ -965,38 +1045,33 @@ export default function XpCalculatorScreen() {
               </Label>
             </Pressable>
           </View>
+        ) : null}
 
-          {loadingSession ? (
-            <View style={styles.sessionRow}>
-              <ActivityIndicator />
-              <BodyText>Checking account...</BodyText>
-            </View>
-          ) : sessionUserId ? (
-            <BodyText>
-              {currentProjectId
-                ? 'This is an existing save. Saving keeps it tied to the selected campaign, or you can make a fresh copy.'
-                : selectedCampaignId
-                  ? 'Signed in. Saving will add this plan to the selected campaign by default.'
-                  : 'Signed in. Saving is enabled.'}
-            </BodyText>
-          ) : (
-            <BodyText>Not signed in. You can calculate, but not save yet.</BodyText>
-          )}
+        {loadingSession ? (
+          <View style={styles.sessionRow}>
+            <ActivityIndicator />
+            <BodyText>Checking account...</BodyText>
+          </View>
+        ) : (
+          <BodyText>{saveHelperText}</BodyText>
+        )}
 
-          {sessionUserId && isCreatingNewProject && isAtFreeLimit ? (
-            <UpgradeBanner
-              title={freeLimitUpsell.title}
-              message={freeLimitUpsell.message}
-              buttonLabel={freeLimitUpsell.buttonLabel}
-              onPress={handleUpgradePress}
-            />
-          ) : null}
-        </View>
+        {sessionUserId && isCreatingNewProject && isAtFreeLimit ? (
+          <UpgradeBanner
+            title={freeLimitUpsell.title}
+            message={freeLimitUpsell.message}
+            buttonLabel={freeLimitUpsell.buttonLabel}
+            onPress={handleUpgradePress}
+          />
+        ) : null}
       </SystemPanel>
 
       {dndCampaignContext ? (
-        <SystemPanel systemId={effectiveSystemId}>
-          <Label>Campaign Party Context</Label>
+        <DisclosurePanel
+          systemId={effectiveSystemId}
+          title="Campaign Party Context"
+          summary={dndCampaignContext.partySummaryLines[0] ?? dndCampaignContext.treasurySummary}
+        >
           <View style={styles.resultRow}>
             {dndCampaignContext.partySummaryLines.length > 0 ? (
               dndCampaignContext.partySummaryLines.map((entry, index) => (
@@ -1007,20 +1082,42 @@ export default function XpCalculatorScreen() {
             )}
             <BodyText>{dndCampaignContext.treasurySummary}</BodyText>
           </View>
-        </SystemPanel>
+        </DisclosurePanel>
       ) : null}
 
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{xpConfig.labels.pacingSummary}</Label>
-        <View style={styles.resultRow}>
-          <BodyText>{result.pacingAssessment}</BodyText>
-          <BodyText>Estimated total encounters: {result.totalEncounterCount}</BodyText>
-          <BodyText>Estimated sessions to cap: {result.estimatedSessionsToCap}</BodyText>
+      <SystemPanel systemId={effectiveSystemId} tone="accent">
+        <Label>Progression Snapshot</Label>
+        <BodyText>{result.pacingAssessment}</BodyText>
+
+        <View style={styles.summaryStatRow}>
+          <View style={styles.summaryStatCard}>
+            <Label style={styles.summaryStatLabel}>Total encounters</Label>
+            <BodyText>{result.totalEncounterCount}</BodyText>
+          </View>
+
+          <View style={styles.summaryStatCard}>
+            <Label style={styles.summaryStatLabel}>Sessions to cap</Label>
+            <BodyText>{result.estimatedSessionsToCap}</BodyText>
+          </View>
+
+          <View style={styles.summaryStatCard}>
+            <Label style={styles.summaryStatLabel}>Mode</Label>
+            <BodyText>{xpConfig.modeLabels[progressionMode]}</BodyText>
+          </View>
         </View>
+
+        <BodyText>Next highlighted beat: {result.milestoneSuggestions[0] ?? 'No highlighted beat yet.'}</BodyText>
       </SystemPanel>
 
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{xpConfig.labels.levelingPreview}</Label>
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title={xpConfig.labels.levelingPreview}
+        summary={
+          progressionMode === 'milestone'
+            ? 'Milestone mode is active.'
+            : `Showing the first ${Math.min(10, result.rows.length)} levels in the preview.`
+        }
+      >
         {progressionMode === 'milestone' ? (
           <BodyText>{xpConfig.labels.milestoneModeCopy}</BodyText>
         ) : (
@@ -1037,34 +1134,43 @@ export default function XpCalculatorScreen() {
             ) : null}
           </>
         )}
-      </SystemPanel>
+      </DisclosurePanel>
 
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{xpConfig.labels.milestoneSuggestions}</Label>
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title={xpConfig.labels.milestoneSuggestions}
+        summary={result.milestoneSuggestions.slice(0, 2).join(' • ')}
+      >
         <View style={styles.resultRow}>
           {result.milestoneSuggestions.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </SystemPanel>
+      </DisclosurePanel>
 
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{xpConfig.labels.practicalAdvice}</Label>
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title={xpConfig.labels.practicalAdvice}
+        summary={result.practicalAdvice[0]}
+      >
         <View style={styles.resultRow}>
           {result.practicalAdvice.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </SystemPanel>
+      </DisclosurePanel>
 
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{xpConfig.labels.optionalPacingVariants}</Label>
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title={xpConfig.labels.optionalPacingVariants}
+        summary={result.pacingVariants[0]}
+      >
         <View style={styles.resultRow}>
           {result.pacingVariants.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </SystemPanel>
+      </DisclosurePanel>
     </Screen>
   );
 }
@@ -1122,6 +1228,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  primaryActionButton: {
+    alignSelf: 'stretch',
+  },
   campaignButton: {
     backgroundColor: Colors.elevated,
     borderRadius: 16,
@@ -1140,6 +1249,13 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     color: '#fff',
+  },
+  moreActionsButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+  },
+  moreActionsButtonText: {
+    color: Colors.text,
   },
   proLockedBlock: {
     backgroundColor: Colors.elevated,
@@ -1189,6 +1305,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
+  },
+  summaryStatRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+  },
+  summaryStatCard: {
+    minWidth: 132,
+    backgroundColor: Colors.elevated,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    gap: 4,
+  },
+  summaryStatLabel: {
+    fontSize: 12,
   },
   resultRow: {
     borderBottomWidth: 1,

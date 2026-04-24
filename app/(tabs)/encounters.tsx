@@ -7,6 +7,7 @@ import { ProCard } from '@/components/ProCard';
 import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Label } from '@/components/AppText';
+import { DisclosurePanel } from '@/components/DisclosurePanel';
 import { Screen } from '@/components/Screen';
 import { SystemHero } from '@/components/SystemHero';
 import { SystemPanel } from '@/components/SystemPanel';
@@ -210,6 +211,8 @@ export default function EncounterScreen() {
   const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [moreSaveActionsOpen, setMoreSaveActionsOpen] = useState(false);
 
   const {
     userId: sessionUserId,
@@ -331,6 +334,8 @@ export default function EncounterScreen() {
     setSessionFallout('');
     setVariationSeed(0);
     setAppliedCampaignDefaultsId('');
+    setAdvancedOpen(false);
+    setMoreSaveActionsOpen(false);
   }, [encounterConfig, params.projectId, currentProjectId]);
 
   useEffect(() => {
@@ -677,6 +682,52 @@ export default function EncounterScreen() {
     variationSeed,
     encounterConfig,
   ]);
+
+  const campaignPanelSummary = selectedCampaign
+    ? `Locked to ${selectedCampaign.systemShortLabel} inside ${selectedCampaign.name}.`
+    : isPro
+      ? 'Standalone battle plan. Expand to tie this encounter into a campaign board.'
+      : 'Campaign linking is available on Pro.';
+
+  const quickSetupSummary = [
+    `Level ${partyLevel || encounterConfig.defaults.partyLevel}`,
+    `${partySize || encounterConfig.defaults.partySize} heroes`,
+    encounterConfig.difficultyLabels[difficulty],
+    encounterConfig.enemyRoleLabels[enemyRole],
+    encounterConfig.terrainLabels[terrainType],
+  ].join(' • ');
+
+  const advancedSummary = dndCampaignContext
+    ? `${enemyCount || encounterConfig.defaults.enemyCount} foes • ${waveCount || encounterConfig.defaults.waveCount} waves • Threat clock write-back ready.`
+    : `${enemyCount || encounterConfig.defaults.enemyCount} foes • ${waveCount || encounterConfig.defaults.waveCount} waves • Party mix and notes tucked here.`;
+
+  const savePanelSummary = currentProjectId
+    ? selectedCampaign
+      ? `Saving updates this encounter inside ${selectedCampaign.name}.`
+      : 'Saving updates the current standalone encounter.'
+    : selectedCampaign
+      ? `The next save goes straight into ${selectedCampaign.name}.`
+      : 'The next save creates a standalone encounter.';
+
+  const primarySaveLabel = saving
+    ? 'Saving...'
+    : currentProjectId
+      ? selectedCampaignId
+        ? 'Update Campaign Save'
+        : 'Update Save'
+      : selectedCampaignId
+        ? 'Save to Campaign'
+        : 'Save Plan';
+
+  const saveHelperText = loadingSession
+    ? 'Checking account...'
+    : sessionUserId
+      ? currentProjectId
+        ? 'Save updates this plan by default. Open more options if you want a fresh copy or campaign move.'
+        : selectedCampaignId
+          ? 'Saving will add this encounter to the selected campaign by default.'
+          : 'Signed in. Save when the battle plan feels ready.'
+      : 'Not signed in. You can calculate, but not save yet.';
 
   function buildPayload() {
     return {
@@ -1043,12 +1094,16 @@ export default function EncounterScreen() {
         <SystemPanel systemId={effectiveSystemId} tone="muted">
           <Label>Opened save</Label>
           <BodyText>{loadedProjectName}</BodyText>
+          <BodyText>Save now updates this encounter plan by default.</BodyText>
         </SystemPanel>
       ) : null}
 
-      <SystemPanel systemId={effectiveSystemId} tone="accent">
-        <Label>Add to Campaign</Label>
-
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        tone="accent"
+        title="Campaign Link"
+        summary={campaignPanelSummary}
+      >
         {!isPro ? (
           <View style={styles.proLockedBlock}>
             <View style={styles.proLockedHeader}>
@@ -1133,7 +1188,15 @@ export default function EncounterScreen() {
             </BodyText>
           </View>
         ) : null}
+      </DisclosurePanel>
 
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        tone="accent"
+        title="Quick Setup"
+        summary={quickSetupSummary}
+        defaultOpen
+      >
         <Label>{encounterConfig.labels.partyLevel}</Label>
         <AppInput
           value={partyLevel}
@@ -1148,81 +1211,6 @@ export default function EncounterScreen() {
           onChangeText={setPartySize}
           keyboardType="numeric"
           placeholder={encounterConfig.defaults.partySize}
-        />
-
-        <Label>{encounterConfig.labels.partyRoleMix}</Label>
-        <View style={styles.gridRow}>
-          <View style={styles.gridItem}>
-            <Label>{encounterConfig.labels.frontline}</Label>
-            <AppInput value={frontlineCount} onChangeText={setFrontlineCount} keyboardType="numeric" />
-          </View>
-          <View style={styles.gridItem}>
-            <Label>{encounterConfig.labels.support}</Label>
-            <AppInput value={supportCount} onChangeText={setSupportCount} keyboardType="numeric" />
-          </View>
-          <View style={styles.gridItem}>
-            <Label>{encounterConfig.labels.control}</Label>
-            <AppInput value={controlCount} onChangeText={setControlCount} keyboardType="numeric" />
-          </View>
-          <View style={styles.gridItem}>
-            <Label>{encounterConfig.labels.striker}</Label>
-            <AppInput value={strikerCount} onChangeText={setStrikerCount} keyboardType="numeric" />
-          </View>
-        </View>
-      </SystemPanel>
-
-      {dndCampaignContext ? (
-        <SystemPanel systemId={effectiveSystemId}>
-          <Label>Campaign Party Readiness</Label>
-          <View style={styles.resultRow}>
-            {dndCampaignContext.partySummaryLines.length > 0 ? (
-              dndCampaignContext.partySummaryLines.map((entry, index) => (
-                <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
-              ))
-            ) : (
-              <BodyText>No party sheets are logged in this campaign yet.</BodyText>
-            )}
-            <BodyText>{dndCampaignContext.treasurySummary}</BodyText>
-            {dndCampaignContext.attunementItems.length > 0 ? (
-              <BodyText>Attunement pressure: {dndCampaignContext.attunementItems.join(', ')}.</BodyText>
-            ) : null}
-            {dndCampaignContext.consumableItems.length > 0 ? (
-              <BodyText>Consumables on hand: {dndCampaignContext.consumableItems.join(', ')}.</BodyText>
-            ) : null}
-          </View>
-        </SystemPanel>
-      ) : null}
-
-      {dndCampaignContext ? (
-        <SystemPanel systemId={effectiveSystemId}>
-          <Label>Campaign Threat Board</Label>
-          <View style={styles.resultRow}>
-            {dndCampaignContext.threatSummaryLines.length > 0 ? (
-              dndCampaignContext.threatSummaryLines.map((entry, index) => (
-                <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
-              ))
-            ) : (
-              <BodyText>No active threat clocks are logged for this campaign yet.</BodyText>
-            )}
-          </View>
-        </SystemPanel>
-      ) : null}
-
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{encounterConfig.labels.enemyCount}</Label>
-        <AppInput
-          value={enemyCount}
-          onChangeText={setEnemyCount}
-          keyboardType="numeric"
-          placeholder={encounterConfig.defaults.enemyCount}
-        />
-
-        <Label>{encounterConfig.labels.enemyLevel}</Label>
-        <AppInput
-          value={enemyLevel}
-          onChangeText={setEnemyLevel}
-          keyboardType="numeric"
-          placeholder={encounterConfig.defaults.enemyLevel}
         />
 
         <Label>{encounterConfig.labels.difficulty}</Label>
@@ -1281,6 +1269,50 @@ export default function EncounterScreen() {
             );
           })}
         </View>
+      </DisclosurePanel>
+
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title="Advanced Encounter Tuning"
+        summary={advancedSummary}
+        open={advancedOpen}
+        onOpenChange={setAdvancedOpen}
+      >
+        <Label>{encounterConfig.labels.partyRoleMix}</Label>
+        <View style={styles.gridRow}>
+          <View style={styles.gridItem}>
+            <Label>{encounterConfig.labels.frontline}</Label>
+            <AppInput value={frontlineCount} onChangeText={setFrontlineCount} keyboardType="numeric" />
+          </View>
+          <View style={styles.gridItem}>
+            <Label>{encounterConfig.labels.support}</Label>
+            <AppInput value={supportCount} onChangeText={setSupportCount} keyboardType="numeric" />
+          </View>
+          <View style={styles.gridItem}>
+            <Label>{encounterConfig.labels.control}</Label>
+            <AppInput value={controlCount} onChangeText={setControlCount} keyboardType="numeric" />
+          </View>
+          <View style={styles.gridItem}>
+            <Label>{encounterConfig.labels.striker}</Label>
+            <AppInput value={strikerCount} onChangeText={setStrikerCount} keyboardType="numeric" />
+          </View>
+        </View>
+
+        <Label>{encounterConfig.labels.enemyCount}</Label>
+        <AppInput
+          value={enemyCount}
+          onChangeText={setEnemyCount}
+          keyboardType="numeric"
+          placeholder={encounterConfig.defaults.enemyCount}
+        />
+
+        <Label>{encounterConfig.labels.enemyLevel}</Label>
+        <AppInput
+          value={enemyLevel}
+          onChangeText={setEnemyLevel}
+          keyboardType="numeric"
+          placeholder={encounterConfig.defaults.enemyLevel}
+        />
 
         <Label>{encounterConfig.labels.waveCount}</Label>
         <AppInput
@@ -1297,6 +1329,7 @@ export default function EncounterScreen() {
           placeholder={encounterConfig.labels.notesPlaceholder}
           multiline
         />
+
         <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
           <Label style={styles.secondaryButtonText}>{encounterConfig.labels.rerollButton}</Label>
         </Pressable>
@@ -1429,31 +1462,33 @@ export default function EncounterScreen() {
             />
           </>
         ) : null}
+      </DisclosurePanel>
 
-        <View style={styles.saveRow}>
+      <SystemPanel systemId={effectiveSystemId} tone="accent">
+        <Label>Save</Label>
+        <BodyText>{savePanelSummary}</BodyText>
+
+        <Pressable
+          onPress={() => handleSaveProject(false)}
+          disabled={saving || loadingSession}
+          style={[
+            styles.saveButton,
+            styles.primaryActionButton,
+            { backgroundColor: palette.accent },
+            (saving || loadingSession) && styles.saveButtonDisabled,
+          ]}
+        >
+          <Label style={styles.saveButtonText}>{primarySaveLabel}</Label>
+        </Pressable>
+
+        <Pressable onPress={() => setMoreSaveActionsOpen((value) => !value)} style={styles.moreActionsButton}>
+          <Label style={styles.moreActionsButtonText}>
+            {moreSaveActionsOpen ? 'Hide more save options' : 'More save options'}
+          </Label>
+        </Pressable>
+
+        {moreSaveActionsOpen ? (
           <View style={styles.actionRow}>
-            <Pressable
-              onPress={() => handleSaveProject(false)}
-              disabled={saving || loadingSession}
-              style={[
-                styles.saveButton,
-                { backgroundColor: palette.accent },
-                (saving || loadingSession) && styles.saveButtonDisabled,
-              ]}
-            >
-              <Label style={styles.saveButtonText}>
-                {saving
-                  ? 'Saving...'
-                  : currentProjectId
-                    ? selectedCampaignId
-                      ? 'Update Campaign Save'
-                      : 'Update Save'
-                    : selectedCampaignId
-                      ? 'Save to Campaign'
-                      : 'Save Plan'}
-              </Label>
-            </Pressable>
-
             <Pressable
               onPress={handleSaveAsNew}
               disabled={saving || loadingSession || !sessionUserId}
@@ -1480,48 +1515,102 @@ export default function EncounterScreen() {
               </Label>
             </Pressable>
           </View>
+        ) : null}
 
-          {loadingSession ? (
-            <View style={styles.sessionRow}>
-              <ActivityIndicator />
-              <BodyText>Checking account...</BodyText>
-            </View>
-          ) : sessionUserId ? (
-            <BodyText>
-              {currentProjectId
-                ? 'This is an existing save. Saving keeps it tied to the selected campaign, or you can make a fresh copy.'
-                : selectedCampaignId
-                  ? 'Signed in. Saving will add this plan to the selected campaign by default.'
-                  : 'Signed in. Saving is enabled.'}
-            </BodyText>
-          ) : (
-            <BodyText>Not signed in. You can calculate, but not save yet.</BodyText>
-          )}
+        {loadingSession ? (
+          <View style={styles.sessionRow}>
+            <ActivityIndicator />
+            <BodyText>Checking account...</BodyText>
+          </View>
+        ) : (
+          <BodyText>{saveHelperText}</BodyText>
+        )}
 
-          {sessionUserId && isCreatingNewProject && isAtFreeLimit ? (
-            <UpgradeBanner
-              title={freeLimitUpsell.title}
-              message={freeLimitUpsell.message}
-              buttonLabel={freeLimitUpsell.buttonLabel}
-              onPress={handleUpgradePress}
-            />
-          ) : null}
-        </View>
-      </SystemPanel>
-
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{encounterConfig.labels.assessment}</Label>
-        <View style={styles.resultRow}>
-          <BodyText>{encounterConfig.labels.partyBudget}: {result.adjustedPartyBudget}</BodyText>
-          <BodyText>{encounterConfig.labels.enemyBudget}: {result.adjustedEnemyBudget}</BodyText>
-          <BodyText>{encounterConfig.labels.difference}: {result.delta}</BodyText>
-          <BodyText>{encounterConfig.labels.verdict}: {result.verdict}</BodyText>
-        </View>
+        {sessionUserId && isCreatingNewProject && isAtFreeLimit ? (
+          <UpgradeBanner
+            title={freeLimitUpsell.title}
+            message={freeLimitUpsell.message}
+            buttonLabel={freeLimitUpsell.buttonLabel}
+            onPress={handleUpgradePress}
+          />
+        ) : null}
       </SystemPanel>
 
       {dndCampaignContext ? (
-        <SystemPanel systemId={effectiveSystemId}>
-          <Label>Monster Bench</Label>
+        <DisclosurePanel
+          systemId={effectiveSystemId}
+          title="Campaign Party Readiness"
+          summary={dndCampaignContext.partySummaryLines[0] ?? dndCampaignContext.treasurySummary}
+        >
+          <View style={styles.resultRow}>
+            {dndCampaignContext.partySummaryLines.length > 0 ? (
+              dndCampaignContext.partySummaryLines.map((entry, index) => (
+                <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+              ))
+            ) : (
+              <BodyText>No party sheets are logged in this campaign yet.</BodyText>
+            )}
+            <BodyText>{dndCampaignContext.treasurySummary}</BodyText>
+            {dndCampaignContext.attunementItems.length > 0 ? (
+              <BodyText>Attunement pressure: {dndCampaignContext.attunementItems.join(', ')}.</BodyText>
+            ) : null}
+            {dndCampaignContext.consumableItems.length > 0 ? (
+              <BodyText>Consumables on hand: {dndCampaignContext.consumableItems.join(', ')}.</BodyText>
+            ) : null}
+          </View>
+        </DisclosurePanel>
+      ) : null}
+
+      {dndCampaignContext ? (
+        <DisclosurePanel
+          systemId={effectiveSystemId}
+          title="Campaign Threat Board"
+          summary={dndCampaignContext.threatSummaryLines[0] ?? 'No active threat clocks are logged yet.'}
+        >
+          <View style={styles.resultRow}>
+            {dndCampaignContext.threatSummaryLines.length > 0 ? (
+              dndCampaignContext.threatSummaryLines.map((entry, index) => (
+                <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+              ))
+            ) : (
+              <BodyText>No active threat clocks are logged for this campaign yet.</BodyText>
+            )}
+          </View>
+        </DisclosurePanel>
+      ) : null}
+
+      <SystemPanel systemId={effectiveSystemId} tone="accent">
+        <Label>Encounter Snapshot</Label>
+        <BodyText>{encounterConfig.labels.verdict}: {result.verdict}</BodyText>
+        <BodyText>{result.actionEconomyWarning}</BodyText>
+
+        <View style={styles.summaryStatRow}>
+          <View style={styles.summaryStatCard}>
+            <Label style={styles.summaryStatLabel}>Party Budget</Label>
+            <BodyText>{result.adjustedPartyBudget}</BodyText>
+          </View>
+
+          <View style={styles.summaryStatCard}>
+            <Label style={styles.summaryStatLabel}>Enemy Budget</Label>
+            <BodyText>{result.adjustedEnemyBudget}</BodyText>
+          </View>
+
+          <View style={styles.summaryStatCard}>
+            <Label style={styles.summaryStatLabel}>Delta</Label>
+            <BodyText>{result.delta}</BodyText>
+          </View>
+        </View>
+
+        <BodyText>{result.bossSupportRecommendation}</BodyText>
+        <BodyText>First tactical beat: {result.tacticalBeats[0] ?? 'No tactical beat yet.'}</BodyText>
+      </SystemPanel>
+
+      {dndCampaignContext ? (
+        <DisclosurePanel
+          systemId={effectiveSystemId}
+          title="Monster Bench"
+          summary={dndCampaignContext.monsterBench[enemyRole][0]?.name ?? 'No linked monster bench yet.'}
+        >
           <View style={styles.resultRow}>
             {dndCampaignContext.monsterBench[enemyRole].map((monster) => (
               <BodyText key={monster.name}>
@@ -1529,43 +1618,55 @@ export default function EncounterScreen() {
               </BodyText>
             ))}
           </View>
-        </SystemPanel>
+        </DisclosurePanel>
       ) : null}
 
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{encounterConfig.labels.warnings}</Label>
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title={encounterConfig.labels.warnings}
+        summary={result.actionEconomyWarning}
+      >
         <View style={styles.resultRow}>
           <BodyText>{result.actionEconomyWarning}</BodyText>
           <BodyText>{result.bossSupportRecommendation}</BodyText>
         </View>
-      </SystemPanel>
+      </DisclosurePanel>
 
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{encounterConfig.labels.builderNotes}</Label>
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title={encounterConfig.labels.builderNotes}
+        summary={result.recommendations[0] ?? 'No builder notes yet.'}
+      >
         <View style={styles.resultRow}>
           {result.recommendations.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </SystemPanel>
+      </DisclosurePanel>
 
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{encounterConfig.labels.lineupIdeas}</Label>
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title={encounterConfig.labels.lineupIdeas}
+        summary={result.lineupIdeas[0] ?? 'No lineup idea yet.'}
+      >
         <View style={styles.resultRow}>
           {result.lineupIdeas.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </SystemPanel>
+      </DisclosurePanel>
 
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{encounterConfig.labels.tacticalBeats}</Label>
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title={encounterConfig.labels.tacticalBeats}
+        summary={result.tacticalBeats[0] ?? 'No tactical beat yet.'}
+      >
         <View style={styles.resultRow}>
           {result.tacticalBeats.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </SystemPanel>
+      </DisclosurePanel>
     </Screen>
   );
 }
@@ -1621,6 +1722,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  primaryActionButton: {
+    alignSelf: 'stretch',
+  },
   campaignButton: {
     backgroundColor: Colors.elevated,
     borderRadius: 16,
@@ -1652,6 +1756,14 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: Colors.text,
+  },
+  moreActionsButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+  },
+  moreActionsButtonText: {
+    color: Colors.text,
+    opacity: 0.8,
   },
   proLockedBlock: {
     backgroundColor: Colors.elevated,
@@ -1704,5 +1816,24 @@ const styles = StyleSheet.create({
   },
   resultRow: {
     gap: 6,
+  },
+  summaryStatRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+  },
+  summaryStatCard: {
+    minWidth: 104,
+    flexGrow: 1,
+    gap: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.elevated,
+  },
+  summaryStatLabel: {
+    color: Colors.mutedText,
   },
 });

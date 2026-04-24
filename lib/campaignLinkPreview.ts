@@ -103,62 +103,12 @@ function getDndPreview(tool: CampaignLinkPreviewTool): CampaignLinkPreview {
   }
 }
 
-function getPf2Preview(tool: CampaignLinkPreviewTool): CampaignLinkPreview {
-  switch (tool) {
-    case 'xp':
-      return {
-        title: CAMPAIGN_PREVIEW_TITLE,
-        body: 'On Pro, advancement planning can stay tied to the same PF2e scenario flow as the rest of your prep.',
-        bullets: [
-          'Carry the campaign tier and current objective into the progression setup.',
-          'Keep pacing aligned with the same scenario pressure driving the rest of your prep.',
-          'Save advancement plans back into one PF2e campaign binder instead of isolated drafts.',
-        ],
-      };
-    case 'encounter':
-      return {
-        title: CAMPAIGN_PREVIEW_TITLE,
-        body: 'On Pro, encounter design can start from the campaign frame instead of rebuilding context every time.',
-        bullets: [
-          'Use one campaign-backed scenario context for party pressure, role coverage, and tactical fallout.',
-          'Keep encounter saves tied to the same PF2e campaign binder as your larger prep thread.',
-          'Feed escalation and aftermath back into the campaign instead of leaving fights isolated.',
-        ],
-      };
-    case 'loot':
-      return {
-        title: CAMPAIGN_PREVIEW_TITLE,
-        body: 'On Pro, reward planning can stay synchronized with the campaign that will actually hand it out.',
-        bullets: [
-          'Keep item ideas, payout pressure, and reward summaries inside one scenario-ready campaign binder.',
-          'Tie generated rewards back to the same prep thread that produced the encounter and quest pressure.',
-          'Build a cleaner reward history instead of standalone loot drafts.',
-        ],
-      };
-    case 'quest':
-    default:
-      return {
-        title: CAMPAIGN_PREVIEW_TITLE,
-        body: 'On Pro, quest prep can draw from the same faction and scenario context driving your campaign.',
-        bullets: [
-          'Pull current objectives and faction motion into the next adventure setup.',
-          'Keep fallout and future hooks aligned with one PF2e campaign thread.',
-          'Turn fast quest drafts into saved prep that reads like one authored campaign.',
-        ],
-      };
-  }
-}
-
 export function getCampaignLinkPreview(
   tool: CampaignLinkPreviewTool,
   systemId: GameSystemId
 ): CampaignLinkPreview {
   if (systemId === 'dnd5e') {
     return getDndPreview(tool);
-  }
-
-  if (systemId === 'pathfinder2e') {
-    return getPf2Preview(tool);
   }
 
   return getHomebrewPreview(tool);

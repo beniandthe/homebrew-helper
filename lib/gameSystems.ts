@@ -1,4 +1,4 @@
-export type GameSystemId = 'homebrew' | 'dnd5e' | 'pathfinder2e';
+export type GameSystemId = 'homebrew' | 'dnd5e';
 
 type TabCopy = {
   home: string;
@@ -299,109 +299,6 @@ export const GAME_SYSTEMS: Record<GameSystemId, GameSystemDefinition> = {
       description: 'View and manage your saved 5e encounters, treasure, adventures, and campaign notes.',
     },
   },
-  pathfinder2e: {
-    id: 'pathfinder2e',
-    label: 'Pathfinder 2e',
-    shortLabel: 'PF2e',
-    tabs: {
-      home: 'Home',
-      campaign: 'Campaign',
-      xp: 'Advancement',
-      encounters: 'Encounter',
-      generator: 'Treasure',
-      quest: 'Quest',
-      projects: 'Saved',
-      account: 'Account',
-    },
-    home: {
-      badge: 'Pathfinder 2e Toolkit',
-      heroTitle: 'Build tighter adventures, treasure pacing, and encounter prep.',
-      heroSubtitle:
-        'Shift the toolkit toward a more tactical, level-aware prep flow with advancement, treasure, encounter pressure, and quest planning tuned for Pathfinder-style campaigns.',
-      primaryCta: 'Plan Advancement',
-      sectionTitle: 'Prep Boards',
-      sectionSubtitle: 'Choose the board that fits level-based prep, treasure pacing, encounter pressure, and campaign continuity.',
-      campaign: {
-        label: 'Campaign',
-        title: 'Campaign Hub',
-        body: 'Track party direction, faction pressure, scenario prep, and saved planning notes in one place.',
-      },
-      xp: {
-        label: 'Advancement',
-        title: 'Advancement Planner',
-        body: 'Map level pacing, milestone beats, and the cadence of major progression moments across a campaign.',
-      },
-      encounters: {
-        label: 'Encounter',
-        title: 'Encounter Planner',
-        body: 'Balance enemy roles, terrain, waves, and tactical pressure before the table reaches the fight.',
-      },
-      generator: {
-        label: 'Treasure',
-        title: 'Treasure Planner',
-        body: 'Shape item bundles, valuables, and reward packages that feel deliberate instead of random.',
-      },
-      quest: {
-        label: 'Quest',
-        title: 'Quest Builder',
-        body: 'Draft clear objectives, complications, and consequences for the next scenario beat.',
-      },
-      projects: {
-        label: 'Saved',
-        title: 'Saved Prep',
-        body: 'Reopen saved prep, refine existing drafts, and keep your scenario notes organized.',
-      },
-      proTitle: 'Campaign Pro',
-      proBody: 'Your account has full access. Keep building scenarios without save limits.',
-    },
-    modeIdentity: {
-      title: 'Pathfinder leans into level-banded scenario prep and tighter tactical language.',
-      body:
-        'It keeps the app focused on level-aware encounter planning, scenario structure, and deliberate reward pacing instead of fifth-edition dungeon cadence.',
-      highlights: [
-        'Encounters speak in severity, enemy level, and tactical pressure instead of CR-style pacing.',
-        'Treasure and advancement are framed around level bands and parcel-like planning.',
-        'Campaign prep emphasizes scenario flow, pressure tracks, and explicit chapter structure.',
-      ],
-    },
-    campaign: {
-      title: 'Campaign Hub',
-      description:
-        'Organize party direction, campaign prep, faction pressure, and saved planning notes with a Pathfinder-style tone.',
-      selectorLabel: 'Game',
-      selectorHelper:
-        'Switch the app into a Pathfinder-style voice for labels, copy, and saved prep.',
-      groupLabel: 'Party Name',
-      groupPlaceholder: 'The Ashen Company',
-      notesPlaceholder: 'Recap, unresolved hooks, next-session prep, NPC reminders, treasure follow-up...',
-      summaryPlaceholder: 'What is the core premise of this campaign, and how does it evolve as the party levels?',
-      objectivePlaceholder: 'What is the party trying to resolve before the next major downtime or travel beat?',
-    },
-    xp: {
-      title: 'Advancement Planner',
-      description:
-        'Plan advancement pace, compare progression styles, and estimate how long the party takes to reach major level milestones.',
-    },
-    encounters: {
-      title: 'Encounter Planner',
-      description:
-        'Build encounters with tactical roles, terrain pressure, wave structure, and party composition in mind.',
-    },
-    generator: {
-      title: 'Treasure Planner',
-      description:
-        'Build more intentional treasure by combining source, rarity, theme, and reward pacing advice.',
-    },
-    quest: {
-      title: 'Quest Builder',
-      description:
-        'Build stronger quest structure with hooks, twists, consequences, alternate resolutions, and faction pressure.',
-    },
-    projects: {
-      title: 'Saved Prep',
-      description: 'View and manage your saved encounters, treasure, quests, and campaign notes.',
-    },
-  },
 };
 
 export const GAME_SYSTEM_OPTIONS = Object.values(GAME_SYSTEMS).map((system) => ({
@@ -434,12 +331,8 @@ export function resolveGameSystemId(value?: string | null): GameSystemId {
     return 'dnd5e';
   }
 
-  if (
-    normalizedValue.includes('pathfinder') ||
-    normalizedValue.includes('pf2') ||
-    normalizedValue.includes('pf 2')
-  ) {
-    return 'pathfinder2e';
+  if (normalizedValue.includes('pathfinder') || normalizedValue.includes('pf2') || normalizedValue.includes('pf 2')) {
+    return DEFAULT_GAME_SYSTEM_ID;
   }
 
   return DEFAULT_GAME_SYSTEM_ID;

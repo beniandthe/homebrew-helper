@@ -7,6 +7,7 @@ import { ProCard } from '@/components/ProCard';
 import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Label } from '@/components/AppText';
+import { DisclosurePanel } from '@/components/DisclosurePanel';
 import { Screen } from '@/components/Screen';
 import { SystemHero } from '@/components/SystemHero';
 import { SystemPanel } from '@/components/SystemPanel';
@@ -69,6 +70,12 @@ type LootProjectData = {
   systemId?: GameSystemId;
   systemName?: string;
 };
+
+const REWARD_TYPE_OPTIONS: RewardType[] = ['gear', 'gold', 'consumable', 'material'];
+const RARITY_OPTIONS: LootRarity[] = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+const REWARD_SOURCE_OPTIONS: RewardSource[] = ['boss', 'chest', 'quest', 'vendor', 'faction'];
+const REWARD_THEME_OPTIONS: RewardTheme[] = ['arcane', 'divine', 'cursed', 'martial', 'wilderness', 'noble'];
+const BUNDLE_STYLE_OPTIONS: BundleStyle[] = ['lean', 'balanced', 'generous'];
 
 function getPromotedRewardCategory(rewardType: RewardType, itemName: string) {
   const normalized = itemName.trim().toLowerCase();
@@ -139,6 +146,8 @@ export default function LootScreen() {
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [promotingReward, setPromotingReward] = useState<'featured' | 'bonus' | 'currency' | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [moreSaveActionsOpen, setMoreSaveActionsOpen] = useState(false);
 
   const {
     userId: sessionUserId,
@@ -248,6 +257,8 @@ export default function LootScreen() {
     setPromotionHolder('Shared');
     setVariationSeed(0);
     setAppliedCampaignDefaultsId('');
+    setAdvancedOpen(false);
+    setMoreSaveActionsOpen(false);
   }, [rewardConfig, params.projectId, currentProjectId]);
 
   useEffect(() => {
@@ -521,6 +532,53 @@ export default function LootScreen() {
       selectedCampaignId,
     ]
   );
+
+  const campaignPanelSummary = selectedCampaign
+    ? `Locked to ${selectedCampaign.systemShortLabel} inside ${selectedCampaign.name}.`
+    : isPro
+      ? 'Standalone reward plan. Expand to tie treasure straight into a campaign ledger.'
+      : 'Campaign linking is available on Pro.';
+
+  const quickSetupSummary = [
+    `Level ${playerLevel || rewardConfig.defaults.playerLevel}`,
+    rewardConfig.rarityLabels[rarity],
+    rewardConfig.rewardTypeLabels[rewardType],
+    rewardConfig.rewardThemeLabels[rewardTheme],
+  ].join(' • ');
+
+  const advancedSummary = [
+    rewardConfig.rewardSourceLabels[rewardSource],
+    rewardConfig.bundleStyleLabels[bundleStyle],
+    prepNotes.trim().length > 0 ? 'Prep note ready' : 'No prep note',
+  ].join(' • ');
+
+  const savePanelSummary = currentProjectId
+    ? selectedCampaign
+      ? `Saving updates this reward plan inside ${selectedCampaign.name}.`
+      : 'Saving updates the current standalone reward plan.'
+    : selectedCampaign
+      ? `The next save goes straight into ${selectedCampaign.name}.`
+      : 'The next save creates a standalone reward plan.';
+
+  const primarySaveLabel = saving
+    ? 'Saving...'
+    : currentProjectId
+      ? selectedCampaignId
+        ? 'Update Campaign Save'
+        : 'Update Save'
+      : selectedCampaignId
+        ? 'Save to Campaign'
+        : 'Save Plan';
+
+  const saveHelperText = loadingSession
+    ? 'Checking account...'
+    : sessionUserId
+      ? currentProjectId
+        ? 'Save updates this plan by default. Open more options if you want a fresh copy or campaign move.'
+        : selectedCampaignId
+          ? 'Saving will add this reward plan to the selected campaign by default.'
+          : 'Signed in. Save when the treasure bundle feels right.'
+      : 'Not signed in. You can generate treasure, but not save yet.';
 
   function buildPayload() {
     return {
@@ -917,12 +975,16 @@ export default function LootScreen() {
         <SystemPanel systemId={effectiveSystemId} tone="muted">
           <Label>Opened save</Label>
           <BodyText>{loadedProjectName}</BodyText>
+          <BodyText>Save now updates this reward plan by default.</BodyText>
         </SystemPanel>
       ) : null}
 
-      <SystemPanel systemId={effectiveSystemId} tone="accent">
-        <Label>Add to Campaign</Label>
-
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        tone="accent"
+        title="Campaign Link"
+        summary={campaignPanelSummary}
+      >
         {!isPro ? (
           <View style={styles.proLockedBlock}>
             <View style={styles.proLockedHeader}>
@@ -1004,7 +1066,15 @@ export default function LootScreen() {
             <BodyText>{dndCampaignContext.treasurySummary}</BodyText>
           </View>
         ) : null}
+      </DisclosurePanel>
 
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        tone="accent"
+        title="Quick Setup"
+        summary={quickSetupSummary}
+        defaultOpen
+      >
         <Label>{rewardConfig.labels.playerLevel}</Label>
         <AppInput
           value={playerLevel}
@@ -1013,17 +1083,9 @@ export default function LootScreen() {
           placeholder={rewardConfig.defaults.playerLevel}
         />
 
-        <Label>{rewardConfig.labels.enemyTier}</Label>
-        <AppInput
-          value={enemyTier}
-          onChangeText={setEnemyTier}
-          keyboardType="numeric"
-          placeholder={rewardConfig.defaults.enemyTier}
-        />
-
         <Label>{rewardConfig.labels.rewardType}</Label>
         <View style={styles.pillRow}>
-          {(['gear', 'gold', 'consumable', 'material'] as RewardType[]).map((option) => {
+          {REWARD_TYPE_OPTIONS.map((option) => {
             const selected = rewardType === option;
 
             return (
@@ -1042,26 +1104,61 @@ export default function LootScreen() {
 
         <Label>{rewardConfig.labels.rarity}</Label>
         <View style={styles.pillRow}>
-          {(['common', 'uncommon', 'rare', 'epic', 'legendary'] as LootRarity[]).map((option) => {
+          {RARITY_OPTIONS.map((option) => {
             const selected = rarity === option;
 
             return (
-                <Pressable
-                  key={option}
-                  onPress={() => setRarity(option)}
-                  style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
-                >
-                  <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                    {rewardConfig.rarityLabels[option]}
-                  </BodyText>
-                </Pressable>
-              );
+              <Pressable
+                key={option}
+                onPress={() => setRarity(option)}
+                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
+              >
+                <BodyText style={selected ? styles.pillTextSelected : undefined}>
+                  {rewardConfig.rarityLabels[option]}
+                </BodyText>
+              </Pressable>
+            );
           })}
         </View>
 
+        <Label>{rewardConfig.labels.rewardTheme}</Label>
+        <View style={styles.pillRow}>
+          {REWARD_THEME_OPTIONS.map((option) => {
+            const selected = rewardTheme === option;
+
+            return (
+              <Pressable
+                key={option}
+                onPress={() => setRewardTheme(option)}
+                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
+              >
+                <BodyText style={selected ? styles.pillTextSelected : undefined}>
+                  {rewardConfig.rewardThemeLabels[option]}
+                </BodyText>
+              </Pressable>
+            );
+          })}
+        </View>
+      </DisclosurePanel>
+
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title="Advanced Reward Shaping"
+        summary={advancedSummary}
+        open={advancedOpen}
+        onOpenChange={setAdvancedOpen}
+      >
+        <Label>{rewardConfig.labels.enemyTier}</Label>
+        <AppInput
+          value={enemyTier}
+          onChangeText={setEnemyTier}
+          keyboardType="numeric"
+          placeholder={rewardConfig.defaults.enemyTier}
+        />
+
         <Label>{rewardConfig.labels.rewardSource}</Label>
         <View style={styles.pillRow}>
-          {(['boss', 'chest', 'quest', 'vendor', 'faction'] as RewardSource[]).map((option) => {
+          {REWARD_SOURCE_OPTIONS.map((option) => {
             const selected = rewardSource === option;
 
             return (
@@ -1078,28 +1175,9 @@ export default function LootScreen() {
           })}
         </View>
 
-        <Label>{rewardConfig.labels.rewardTheme}</Label>
-        <View style={styles.pillRow}>
-          {(['arcane', 'divine', 'cursed', 'martial', 'wilderness', 'noble'] as RewardTheme[]).map((option) => {
-            const selected = rewardTheme === option;
-
-            return (
-              <Pressable
-                key={option}
-                onPress={() => setRewardTheme(option)}
-                style={[styles.pill, selected && { backgroundColor: palette.accent, borderColor: palette.accent }]}
-              >
-                <BodyText style={selected ? styles.pillTextSelected : undefined}>
-                  {rewardConfig.rewardThemeLabels[option]}
-                </BodyText>
-              </Pressable>
-            );
-          })}
-        </View>
-
         <Label>{rewardConfig.labels.bundleStyle}</Label>
         <View style={styles.pillRow}>
-          {(['lean', 'balanced', 'generous'] as BundleStyle[]).map((option) => {
+          {BUNDLE_STYLE_OPTIONS.map((option) => {
             const selected = bundleStyle === option;
 
             return (
@@ -1123,34 +1201,37 @@ export default function LootScreen() {
           placeholder={rewardConfig.labels.prepNotesPlaceholder}
           multiline
         />
+
         <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
           <Label style={styles.secondaryButtonText}>{rewardConfig.labels.rerollButton}</Label>
         </Pressable>
+      </DisclosurePanel>
 
-        <View style={styles.saveRow}>
+      <SystemPanel systemId={effectiveSystemId} tone="accent">
+        <Label>Save</Label>
+        <BodyText>{savePanelSummary}</BodyText>
+
+        <Pressable
+          onPress={() => handleSaveProject(false)}
+          disabled={saving || loadingSession}
+          style={[
+            styles.saveButton,
+            styles.primaryActionButton,
+            { backgroundColor: palette.accent },
+            (saving || loadingSession) && styles.saveButtonDisabled,
+          ]}
+        >
+          <Label style={styles.saveButtonText}>{primarySaveLabel}</Label>
+        </Pressable>
+
+        <Pressable onPress={() => setMoreSaveActionsOpen((value) => !value)} style={styles.moreActionsButton}>
+          <Label style={styles.moreActionsButtonText}>
+            {moreSaveActionsOpen ? 'Hide more save options' : 'More save options'}
+          </Label>
+        </Pressable>
+
+        {moreSaveActionsOpen ? (
           <View style={styles.actionRow}>
-            <Pressable
-              onPress={() => handleSaveProject(false)}
-              disabled={saving || loadingSession}
-              style={[
-                styles.saveButton,
-                { backgroundColor: palette.accent },
-                (saving || loadingSession) && styles.saveButtonDisabled,
-              ]}
-            >
-              <Label style={styles.saveButtonText}>
-                {saving
-                  ? 'Saving...'
-                  : currentProjectId
-                    ? selectedCampaignId
-                      ? 'Update Campaign Save'
-                      : 'Update Save'
-                    : selectedCampaignId
-                      ? 'Save to Campaign'
-                      : 'Save Plan'}
-              </Label>
-            </Pressable>
-
             <Pressable
               onPress={handleSaveAsNew}
               disabled={saving || loadingSession || !sessionUserId}
@@ -1177,75 +1258,99 @@ export default function LootScreen() {
               </Label>
             </Pressable>
           </View>
+        ) : null}
 
-          {loadingSession ? (
-            <View style={styles.sessionRow}>
-              <ActivityIndicator />
-              <BodyText>Checking account...</BodyText>
-            </View>
-          ) : sessionUserId ? (
-            <BodyText>
-              {currentProjectId
-                ? 'This is an existing save. Saving keeps it tied to the selected campaign, or you can make a fresh copy.'
-                : selectedCampaignId
-                  ? 'Signed in. Saving will add this plan to the selected campaign by default.'
-                  : 'Signed in. Saving is enabled.'}
-            </BodyText>
-          ) : (
-            <BodyText>Not signed in. You can generate loot, but not save yet.</BodyText>
-          )}
+        {loadingSession ? (
+          <View style={styles.sessionRow}>
+            <ActivityIndicator />
+            <BodyText>Checking account...</BodyText>
+          </View>
+        ) : (
+          <BodyText>{saveHelperText}</BodyText>
+        )}
 
-          {sessionUserId && isCreatingNewProject && isAtFreeLimit ? (
-            <UpgradeBanner
-              title={freeLimitUpsell.title}
-              message={freeLimitUpsell.message}
-              buttonLabel={freeLimitUpsell.buttonLabel}
-              onPress={handleUpgradePress}
-            />
-          ) : null}
-        </View>
-      </SystemPanel>
-
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{rewardConfig.labels.rewardSummary}</Label>
-        <View style={styles.resultRow}>
-          <BodyText>{result.rewardSummary}</BodyText>
-          <BodyText>{rewardConfig.labels.featuredItem}: {result.itemName}</BodyText>
-          <BodyText>{rewardConfig.labels.itemDetail}: {result.itemDetail.description}</BodyText>
-          <BodyText>{rewardConfig.labels.statLine}: {result.itemDetail.statLine}</BodyText>
-          <BodyText>{rewardConfig.labels.bonusItem}: {result.bonusItem}</BodyText>
-          <BodyText>{rewardConfig.labels.currencyValue}: {result.goldAmount}</BodyText>
-        </View>
+        {sessionUserId && isCreatingNewProject && isAtFreeLimit ? (
+          <UpgradeBanner
+            title={freeLimitUpsell.title}
+            message={freeLimitUpsell.message}
+            buttonLabel={freeLimitUpsell.buttonLabel}
+            onPress={handleUpgradePress}
+          />
+        ) : null}
       </SystemPanel>
 
       {dndCampaignContext ? (
-        <SystemPanel systemId={effectiveSystemId}>
-          <Label>Party Inventory Context</Label>
+        <DisclosurePanel
+          systemId={effectiveSystemId}
+          title="Party Inventory Context"
+          summary={dndCampaignContext.inventorySummaryLines[0] ?? dndCampaignContext.treasurySummary}
+        >
           <View style={styles.resultRow}>
-            {dndCampaignContext.inventorySummaryLines.map((entry, index) => (
-              <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
-            ))}
+            {dndCampaignContext.inventorySummaryLines.length > 0 ? (
+              dndCampaignContext.inventorySummaryLines.map((entry, index) => (
+                <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+              ))
+            ) : (
+              <BodyText>No tracked party inventory is logged yet.</BodyText>
+            )}
             {dndCampaignContext.trackedItemNames.length > 0 ? (
               <BodyText>Ledger snapshot: {dndCampaignContext.trackedItemNames.slice(0, 6).join(', ')}.</BodyText>
             ) : null}
           </View>
-        </SystemPanel>
+        </DisclosurePanel>
       ) : null}
 
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{rewardConfig.labels.sourceGuidance}</Label>
+      <SystemPanel systemId={effectiveSystemId} tone="accent">
+        <Label>Treasure Snapshot</Label>
+        <BodyText>{result.rewardSummary}</BodyText>
+        <BodyText>{rewardConfig.labels.featuredItem}: {result.itemName}</BodyText>
+        <BodyText>{rewardConfig.labels.itemDetail}: {result.itemDetail.description}</BodyText>
+        <BodyText>{rewardConfig.labels.statLine}: {result.itemDetail.statLine}</BodyText>
+
+        <View style={styles.summaryStatRow}>
+          <View style={styles.summaryStatCard}>
+            <Label style={styles.summaryStatLabel}>Rarity</Label>
+            <BodyText>{rewardConfig.rarityLabels[rarity]}</BodyText>
+          </View>
+
+          <View style={styles.summaryStatCard}>
+            <Label style={styles.summaryStatLabel}>Bundle</Label>
+            <BodyText>{rewardConfig.bundleStyleLabels[bundleStyle]}</BodyText>
+          </View>
+
+          <View style={styles.summaryStatCard}>
+            <Label style={styles.summaryStatLabel}>Coin</Label>
+            <BodyText>{result.goldAmount}</BodyText>
+          </View>
+        </View>
+
+        <BodyText>{rewardConfig.labels.bonusItem}: {result.bonusItem}</BodyText>
+        {rewardRecipientSuggestions[0] ? (
+          <BodyText>Best current fit: {rewardRecipientSuggestions[0]}</BodyText>
+        ) : null}
+      </SystemPanel>
+
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title={rewardConfig.labels.sourceGuidance}
+        summary={result.flavorNote}
+      >
         <View style={styles.resultRow}>
           <BodyText>{result.flavorNote}</BodyText>
         </View>
-      </SystemPanel>
+      </DisclosurePanel>
 
       {dndCampaignContext ? (
-        <SystemPanel systemId={effectiveSystemId}>
-          <Label>Promote Into Campaign</Label>
+        <DisclosurePanel
+          systemId={effectiveSystemId}
+          title="Promote Into Campaign"
+          summary={`Post treasure into ${selectedCampaign?.name ?? 'the linked campaign'}.`}
+        >
           <View style={styles.resultRow}>
             <BodyText>
               Post this reward straight into {selectedCampaign?.name ?? 'the linked campaign'} so the party ledger and treasury keep pace with generated treasure.
             </BodyText>
+
             <Label>Assign promoted items to</Label>
             <View style={styles.pillRow}>
               {promotionHolderOptions.map((option) => {
@@ -1262,6 +1367,7 @@ export default function LootScreen() {
                 );
               })}
             </View>
+
             <View style={styles.actionRow}>
               <Pressable
                 onPress={() => handlePromoteInventoryItem('featured')}
@@ -1296,44 +1402,58 @@ export default function LootScreen() {
                 </Label>
               </Pressable>
             </View>
+
             <BodyText>
               Best current fit: {rewardRecipientCandidates[0]?.name ?? 'Shared party stash'}.
             </BodyText>
           </View>
-        </SystemPanel>
+        </DisclosurePanel>
       ) : null}
 
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{rewardConfig.labels.practicalAdvice}</Label>
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title={rewardConfig.labels.practicalAdvice}
+        summary={result.practicalAdvice[0] ?? 'No practical advice yet.'}
+      >
         <View style={styles.resultRow}>
           {result.practicalAdvice.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </SystemPanel>
+      </DisclosurePanel>
 
       {dndCampaignContext ? (
-        <SystemPanel systemId={effectiveSystemId}>
-          <Label>Best Party Fits</Label>
+        <DisclosurePanel
+          systemId={effectiveSystemId}
+          title="Best Party Fits"
+          summary={rewardRecipientSuggestions[0] ?? 'Shared stash is the safest fit right now.'}
+        >
           <View style={styles.resultRow}>
-            {rewardRecipientSuggestions.map((entry, index) => (
-              <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
-            ))}
+            {rewardRecipientSuggestions.length > 0 ? (
+              rewardRecipientSuggestions.map((entry, index) => (
+                <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
+              ))
+            ) : (
+              <BodyText>Shared stash is the safest fit until the party roster fills out.</BodyText>
+            )}
             {dndCampaignContext.attunementItems.length > 0 ? (
               <BodyText>Current attunement watch list: {dndCampaignContext.attunementItems.join(', ')}.</BodyText>
             ) : null}
           </View>
-        </SystemPanel>
+        </DisclosurePanel>
       ) : null}
 
-      <SystemPanel systemId={effectiveSystemId}>
-        <Label>{rewardConfig.labels.encounterHooks}</Label>
+      <DisclosurePanel
+        systemId={effectiveSystemId}
+        title={rewardConfig.labels.encounterHooks}
+        summary={result.encounterHooks[0] ?? 'No encounter hooks yet.'}
+      >
         <View style={styles.resultRow}>
           {result.encounterHooks.map((entry, index) => (
             <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
           ))}
         </View>
-      </SystemPanel>
+      </DisclosurePanel>
     </Screen>
   );
 }
@@ -1383,6 +1503,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  primaryActionButton: {
+    alignSelf: 'stretch',
+  },
   campaignButton: {
     backgroundColor: Colors.elevated,
     borderRadius: 16,
@@ -1414,6 +1537,14 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: Colors.text,
+  },
+  moreActionsButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+  },
+  moreActionsButtonText: {
+    color: Colors.text,
+    opacity: 0.8,
   },
   proLockedBlock: {
     backgroundColor: Colors.elevated,
@@ -1466,5 +1597,24 @@ const styles = StyleSheet.create({
   },
   resultRow: {
     gap: 8,
+  },
+  summaryStatRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+  },
+  summaryStatCard: {
+    minWidth: 104,
+    flexGrow: 1,
+    gap: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.elevated,
+  },
+  summaryStatLabel: {
+    color: Colors.mutedText,
   },
 });

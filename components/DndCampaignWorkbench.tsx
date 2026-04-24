@@ -1,8 +1,9 @@
-import { Dispatch, SetStateAction, useMemo } from 'react';
+import { Dispatch, SetStateAction, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Label } from '@/components/AppText';
+import { DisclosurePanel } from '@/components/DisclosurePanel';
 import { SystemPanel } from '@/components/SystemPanel';
 import { Colors, Spacing } from '@/constants/theme';
 import {
@@ -23,6 +24,8 @@ import {
 } from '@/lib/dnd5eCampaignKit';
 import { type DndThreatClockEntry } from '@/lib/dndCampaignLedger';
 import { getSystemPresentation } from '@/lib/systemPresentation';
+
+type FieldGuideSectionKey = 'all' | 'species' | 'class' | 'weapon' | 'armor' | 'gear' | 'monster';
 
 type DndCampaignWorkbenchProps = {
   partyRoster: DndPartyMember[];
@@ -48,6 +51,8 @@ export function DndCampaignWorkbench({
   threatClocks,
 }: DndCampaignWorkbenchProps) {
   const palette = getSystemPresentation('dnd5e').palette;
+  const [fieldGuideQuery, setFieldGuideQuery] = useState('');
+  const [fieldGuideCategory, setFieldGuideCategory] = useState<FieldGuideSectionKey>('all');
   const snapshot = useMemo(
     () =>
       buildDndCampaignWorkbenchSnapshot({
@@ -110,6 +115,90 @@ export function DndCampaignWorkbench({
 
     return next;
   }, [activeThreats]);
+  const fieldGuideSections = useMemo(
+    () => [
+      {
+        key: 'species' as const,
+        title: 'Species Bench',
+        items: DND_SPECIES_REFERENCE.map((entry) => ({
+          key: entry.name,
+          title: entry.name,
+          body: entry.note,
+          searchText: `${entry.name} ${entry.note}`.toLowerCase(),
+        })),
+      },
+      {
+        key: 'class' as const,
+        title: 'Class Bench',
+        items: DND_CLASS_REFERENCE.map((entry) => ({
+          key: entry.name,
+          title: entry.name,
+          body: entry.note,
+          searchText: `${entry.name} ${entry.note}`.toLowerCase(),
+        })),
+      },
+      {
+        key: 'weapon' as const,
+        title: 'Weapon Bench',
+        items: DND_WEAPON_REFERENCE.map((entry) => ({
+          key: entry.name,
+          title: `${entry.name} - ${entry.damage}`,
+          subtitle: `${entry.category} - ${entry.properties}`,
+          body: entry.note,
+          searchText: `${entry.name} ${entry.damage} ${entry.category} ${entry.properties} ${entry.note}`.toLowerCase(),
+        })),
+      },
+      {
+        key: 'armor' as const,
+        title: 'Armor Bench',
+        items: DND_ARMOR_REFERENCE.map((entry) => ({
+          key: entry.name,
+          title: `${entry.name} - ${entry.armorClass}`,
+          subtitle: entry.category,
+          body: entry.note,
+          searchText: `${entry.name} ${entry.armorClass} ${entry.category} ${entry.note}`.toLowerCase(),
+        })),
+      },
+      {
+        key: 'gear' as const,
+        title: 'Gear & Magic Calls',
+        items: DND_GEAR_REFERENCE.map((entry) => ({
+          key: entry.name,
+          title: entry.name,
+          body: entry.note,
+          searchText: `${entry.name} ${entry.note}`.toLowerCase(),
+        })),
+      },
+      {
+        key: 'monster' as const,
+        title: 'Monster Bench',
+        items: DND_MONSTER_REFERENCE.map((entry) => ({
+          key: entry.name,
+          title: `${entry.name} - ${entry.challenge}`,
+          subtitle: `${entry.creatureType} | AC ${entry.armorClass} | HP ${entry.hitPoints} | ${entry.speed}`,
+          body: entry.signature,
+          searchText: `${entry.name} ${entry.challenge} ${entry.creatureType} ${entry.armorClass} ${entry.hitPoints} ${entry.speed} ${entry.signature}`.toLowerCase(),
+        })),
+      },
+    ],
+    []
+  );
+  const normalizedFieldGuideQuery = fieldGuideQuery.trim().toLowerCase();
+  const filteredFieldGuideSections = useMemo(() => {
+    return fieldGuideSections
+      .filter((section) => fieldGuideCategory === 'all' || section.key === fieldGuideCategory)
+      .map((section) => ({
+        ...section,
+        items: normalizedFieldGuideQuery
+          ? section.items.filter((item) => item.searchText.includes(normalizedFieldGuideQuery))
+          : section.items,
+      }))
+      .filter((section) => section.items.length > 0);
+  }, [fieldGuideCategory, fieldGuideSections, normalizedFieldGuideQuery]);
+  const fieldGuideResultCount = useMemo(
+    () => filteredFieldGuideSections.reduce((total, section) => total + section.items.length, 0),
+    [filteredFieldGuideSections]
+  );
 
   function updatePartyMember(id: string, field: keyof DndPartyMember, value: string) {
     setPartyRoster((current) =>
@@ -183,7 +272,16 @@ export function DndCampaignWorkbench({
         </View>
       </SystemPanel>
 
-      <SystemPanel systemId="dnd5e">
+      <DisclosurePanel
+        systemId="dnd5e"
+        title="Party Sheets"
+        summary={
+          partyRoster.length > 0
+            ? `${snapshot.partyCount} heroes • ${snapshot.averageLevelLabel}`
+            : 'No party sheets yet. Add the first hero to start building the roster.'
+        }
+        defaultOpen={partyRoster.length === 0}
+      >
         <View style={styles.sectionHeaderRow}>
           <View style={styles.sectionTitleBlock}>
             <Label>Party Sheets</Label>
@@ -208,14 +306,20 @@ export function DndCampaignWorkbench({
               const assignedItems = assignedItemsByHolder.get(member.name.trim().toLowerCase()) ?? [];
 
               return (
-                <View
+                <DisclosurePanel
                   key={member.id}
-                  style={[styles.workCard, { borderColor: palette.heroBorder, backgroundColor: palette.panelMuted }]}
+                  systemId="dnd5e"
+                  title={`Hero ${index + 1}`}
+                  summary={[
+                    member.name.trim() || 'Unnamed adventurer',
+                    member.className.trim() || 'No class yet',
+                    member.level.trim().length > 0 ? `Level ${member.level.trim()}` : 'No level yet',
+                    assignedItems.length > 0 ? `${assignedItems.length} assigned items` : 'No assigned items',
+                  ].join(' • ')}
+                  defaultOpen={index === 0}
                 >
                 <View style={styles.cardHeaderRow}>
                   <View style={styles.sectionTitleBlock}>
-                    <Label>Hero {index + 1}</Label>
-                    <BodyText>{member.name.trim() || 'Unnamed adventurer'}</BodyText>
                     {assignedItems.length > 0 ? (
                       <BodyText style={styles.assignmentText}>
                         Assigned gear: {assignedItems.map((item) => item.name).join(', ')}
@@ -317,14 +421,23 @@ export function DndCampaignWorkbench({
                   placeholder="Owes a favor to the temple quartermaster. Hates goblins."
                   multiline
                 />
-                </View>
+                </DisclosurePanel>
               );
             })}
           </View>
         )}
-      </SystemPanel>
+      </DisclosurePanel>
 
-      <SystemPanel systemId="dnd5e">
+      <DisclosurePanel
+        systemId="dnd5e"
+        title="Shared Inventory & Treasury"
+        summary={
+          sharedInventory.length > 0
+            ? `${snapshot.inventoryCount} tracked items • ${snapshot.treasurySummary}`
+            : `No tracked loot yet • ${snapshot.treasurySummary}`
+        }
+        defaultOpen={sharedInventory.length === 0}
+      >
         <View style={styles.sectionHeaderRow}>
           <View style={styles.sectionTitleBlock}>
             <Label>Shared Inventory & Treasury</Label>
@@ -397,14 +510,21 @@ export function DndCampaignWorkbench({
         ) : (
           <View style={styles.cardStack}>
             {sharedInventory.map((item, index) => (
-              <View
+              <DisclosurePanel
                 key={item.id}
-                style={[styles.workCard, { borderColor: palette.heroBorder, backgroundColor: palette.panelMuted }]}
+                systemId="dnd5e"
+                title={`Item ${index + 1}`}
+                summary={[
+                  item.name.trim() || 'Unnamed loot entry',
+                  item.category.trim() || 'No category yet',
+                  item.holder.trim() || 'Shared',
+                  item.rarity.trim() || 'No rarity yet',
+                ].join(' • ')}
+                defaultOpen={index === 0}
               >
                 <View style={styles.cardHeaderRow}>
                   <View style={styles.sectionTitleBlock}>
-                    <Label>Item {index + 1}</Label>
-                    <BodyText>{item.name.trim() || 'Unnamed loot entry'}</BodyText>
+                    <BodyText>{item.quantity.trim().length > 0 ? `Quantity ${item.quantity.trim()}` : 'Quantity not set'}</BodyText>
                   </View>
                   <Pressable onPress={() => removeInventoryItem(item.id)} style={styles.secondaryButton}>
                     <Label style={styles.secondaryButtonText}>Remove</Label>
@@ -471,13 +591,22 @@ export function DndCampaignWorkbench({
                   placeholder="Recovered from the river shrine. Still needs Identify."
                   multiline
                 />
-              </View>
+              </DisclosurePanel>
             ))}
           </View>
         )}
-      </SystemPanel>
+      </DisclosurePanel>
 
-      <SystemPanel systemId="dnd5e">
+      <DisclosurePanel
+        systemId="dnd5e"
+        title="NPC Web"
+        summary={
+          npcRoster.length > 0
+            ? `${snapshot.npcCount} named NPCs • ${activeThreats.length} live threat links`
+            : 'No named NPCs yet. Add a patron, rival, or guide to ground the campaign.'
+        }
+        defaultOpen={npcRoster.length === 0}
+      >
         <View style={styles.sectionHeaderRow}>
           <View style={styles.sectionTitleBlock}>
             <Label>NPC Web</Label>
@@ -511,14 +640,22 @@ export function DndCampaignWorkbench({
                 : [];
 
               return (
-                <View
+                <DisclosurePanel
                   key={npc.id}
-                  style={[styles.workCard, { borderColor: palette.heroBorder, backgroundColor: palette.panelMuted }]}
+                  systemId="dnd5e"
+                  title={`NPC ${index + 1}`}
+                  summary={[
+                    npc.name.trim() || 'Unnamed contact',
+                    npc.role.trim() || 'No role yet',
+                    npc.affiliation.trim() || 'No affiliation yet',
+                    directThreats.length > 0 || factionThreats.length > 0
+                      ? `${directThreats.length + factionThreats.length} threat hooks`
+                      : 'No active pressure',
+                  ].join(' • ')}
+                  defaultOpen={index === 0}
                 >
                 <View style={styles.cardHeaderRow}>
                   <View style={styles.sectionTitleBlock}>
-                    <Label>NPC {index + 1}</Label>
-                    <BodyText>{npc.name.trim() || 'Unnamed contact'}</BodyText>
                     {directThreats.length > 0 ? (
                       <BodyText style={styles.assignmentText}>
                         Direct pressure: {directThreats.map((entry) => entry.escalationTag || entry.title).join(', ')}
@@ -587,14 +724,24 @@ export function DndCampaignWorkbench({
                   placeholder="Will fund the delve if the relic returns to the temple."
                   multiline
                 />
-                </View>
+                </DisclosurePanel>
               );
             })}
           </View>
         )}
-      </SystemPanel>
+      </DisclosurePanel>
 
-      <SystemPanel systemId="dnd5e">
+      <DisclosurePanel
+        systemId="dnd5e"
+        title="SRD Field Guide"
+        summary={
+          normalizedFieldGuideQuery.length > 0
+            ? `${fieldGuideResultCount} matches for "${fieldGuideQuery.trim()}".`
+            : fieldGuideCategory === 'all'
+              ? 'Search species, classes, weapons, armor, gear, and monsters.'
+              : `Browsing ${fieldGuideCategory} references.`
+        }
+      >
         <Label>SRD Field Guide</Label>
         <BodyText>
           These quick references make the D&D lock feel like a working DM tool instead of a
@@ -602,63 +749,50 @@ export function DndCampaignWorkbench({
           species, class, weapon, armor, item, and monster anchors.
         </BodyText>
 
-        <ReferenceSection
-          title="Species Bench"
-          items={DND_SPECIES_REFERENCE.map((entry) => ({
-            key: entry.name,
-            title: entry.name,
-            body: entry.note,
-          }))}
+        <AppInput
+          value={fieldGuideQuery}
+          onChangeText={setFieldGuideQuery}
+          placeholder="Search goblin, rogue, longsword, attunement, stealth..."
         />
 
-        <ReferenceSection
-          title="Class Bench"
-          items={DND_CLASS_REFERENCE.map((entry) => ({
-            key: entry.name,
-            title: entry.name,
-            body: entry.note,
-          }))}
-        />
+        <View style={styles.filterPillRow}>
+          {([
+            ['all', 'All'],
+            ['species', 'Species'],
+            ['class', 'Classes'],
+            ['weapon', 'Weapons'],
+            ['armor', 'Armor'],
+            ['gear', 'Gear'],
+            ['monster', 'Monsters'],
+          ] as const).map(([key, label]) => {
+            const selected = fieldGuideCategory === key;
 
-        <ReferenceSection
-          title="Weapon Bench"
-          items={DND_WEAPON_REFERENCE.map((entry) => ({
-            key: entry.name,
-            title: `${entry.name} - ${entry.damage}`,
-            subtitle: `${entry.category} - ${entry.properties}`,
-            body: entry.note,
-          }))}
-        />
+            return (
+              <Pressable
+                key={key}
+                onPress={() => setFieldGuideCategory(key)}
+                style={[
+                  styles.filterPill,
+                  selected && { backgroundColor: palette.accent, borderColor: palette.accent },
+                ]}
+              >
+                <BodyText style={selected ? styles.filterPillTextSelected : undefined}>{label}</BodyText>
+              </Pressable>
+            );
+          })}
+        </View>
 
-        <ReferenceSection
-          title="Armor Bench"
-          items={DND_ARMOR_REFERENCE.map((entry) => ({
-            key: entry.name,
-            title: `${entry.name} - ${entry.armorClass}`,
-            subtitle: entry.category,
-            body: entry.note,
-          }))}
-        />
-
-        <ReferenceSection
-          title="Gear & Magic Calls"
-          items={DND_GEAR_REFERENCE.map((entry) => ({
-            key: entry.name,
-            title: entry.name,
-            body: entry.note,
-          }))}
-        />
-
-        <ReferenceSection
-          title="Monster Bench"
-          items={DND_MONSTER_REFERENCE.map((entry) => ({
-            key: entry.name,
-            title: `${entry.name} - ${entry.challenge}`,
-            subtitle: `${entry.creatureType} | AC ${entry.armorClass} | HP ${entry.hitPoints} | ${entry.speed}`,
-            body: entry.signature,
-          }))}
-        />
-      </SystemPanel>
+        {filteredFieldGuideSections.length > 0 ? (
+          filteredFieldGuideSections.map((section) => (
+            <ReferenceSection key={section.key} title={section.title} items={section.items} />
+          ))
+        ) : (
+          <BodyText>
+            No field guide entries match that search yet. Try a creature type, item name, class,
+            species, or gear keyword.
+          </BodyText>
+        )}
+      </DisclosurePanel>
     </>
   );
 }
@@ -675,18 +809,23 @@ type ReferenceSectionProps = {
 
 function ReferenceSection({ title, items }: ReferenceSectionProps) {
   return (
-    <View style={styles.referenceSection}>
-      <Label>{title}</Label>
-      <View style={styles.referenceGrid}>
-        {items.map((item) => (
-          <View key={item.key} style={styles.referenceCard}>
-            <Label>{item.title}</Label>
-            {item.subtitle ? <BodyText style={styles.referenceSubtitle}>{item.subtitle}</BodyText> : null}
-            <BodyText>{item.body}</BodyText>
-          </View>
-        ))}
+    <DisclosurePanel
+      systemId="dnd5e"
+      title={title}
+      summary={`${items.length} reference ${items.length === 1 ? 'entry' : 'entries'}`}
+    >
+      <View style={styles.referenceSection}>
+        <View style={styles.referenceGrid}>
+          {items.map((item) => (
+            <View key={item.key} style={styles.referenceCard}>
+              <Label>{item.title}</Label>
+              {item.subtitle ? <BodyText style={styles.referenceSubtitle}>{item.subtitle}</BodyText> : null}
+              <BodyText>{item.body}</BodyText>
+            </View>
+          ))}
+        </View>
       </View>
-    </View>
+    </DisclosurePanel>
   );
 }
 
@@ -772,6 +911,22 @@ const styles = StyleSheet.create({
   },
   referenceSection: {
     gap: Spacing.sm,
+  },
+  filterPillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+  },
+  filterPill: {
+    backgroundColor: Colors.elevated,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  filterPillTextSelected: {
+    color: '#fff',
   },
   referenceGrid: {
     flexDirection: 'row',

@@ -7,6 +7,7 @@ import { ProCard } from '@/components/ProCard';
 import { UpgradeBanner } from '@/components/UpgradeBanner';
 import { AppInput } from '@/components/AppInput';
 import { BodyText, Label } from '@/components/AppText';
+import { DisclosurePanel } from '@/components/DisclosurePanel';
 import { Screen } from '@/components/Screen';
 import { SystemHero } from '@/components/SystemHero';
 import { SystemPanel } from '@/components/SystemPanel';
@@ -110,6 +111,8 @@ export default function QuestScreen() {
   const [questNotes, setQuestNotes] = useState('');
   const [variationSeed, setVariationSeed] = useState(0);
   const [appliedCampaignDefaultsId, setAppliedCampaignDefaultsId] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [moreSaveActionsOpen, setMoreSaveActionsOpen] = useState(false);
 
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadedProjectName, setLoadedProjectName] = useState<string | null>(null);
@@ -199,6 +202,8 @@ export default function QuestScreen() {
         setQuestNotes('');
         setVariationSeed(0);
         setAppliedCampaignDefaultsId('');
+        setAdvancedOpen(false);
+        setMoreSaveActionsOpen(false);
     }, [questConfig, params.projectId, currentProjectId]);
 
     useEffect(() => {
@@ -367,6 +372,52 @@ export default function QuestScreen() {
         variationSeed,
         questConfig,
     ]);
+
+    const campaignPanelSummary = selectedCampaign
+        ? `Locked to ${selectedCampaign.systemShortLabel} inside ${selectedCampaign.name}.`
+        : isPro
+            ? 'Standalone adventure. Expand to tie it into a campaign binder.'
+            : 'Campaign linking is available on Pro.';
+
+    const quickSetupSummary = [
+        questConfig.toneLabels[tone],
+        questConfig.scopeLabels[scope],
+        factionName.trim() || questConfig.defaults.factionName,
+    ].join(' • ');
+
+    const advancedSummary = [
+        questConfig.structureLabels[structure],
+        questConfig.resolutionLabels[resolutionStyle],
+        questConfig.impactLabels[factionImpact],
+    ].join(' • ');
+
+    const savePanelSummary = currentProjectId
+        ? selectedCampaign
+            ? `Saving updates this adventure inside ${selectedCampaign.name}.`
+            : 'Saving updates the current standalone adventure.'
+        : selectedCampaign
+            ? `The next save goes straight into ${selectedCampaign.name}.`
+            : 'The next save creates a standalone adventure.';
+
+    const primarySaveLabel = saving
+        ? 'Saving...'
+        : currentProjectId
+            ? selectedCampaignId
+                ? 'Update Campaign Save'
+                : 'Update Save'
+            : selectedCampaignId
+                ? 'Save to Campaign'
+                : 'Save Plan';
+
+    const saveHelperText = loadingSession
+        ? 'Checking account...'
+        : sessionUserId
+            ? currentProjectId
+                ? 'Save updates this plan by default. Open more options if you want a fresh copy or campaign move.'
+                : selectedCampaignId
+                    ? 'Saving will add this plan to the selected campaign by default.'
+                    : 'Signed in. Save when the adventure frame feels right.'
+            : 'Not signed in. You can generate adventures, but not save yet.';
 
     function buildPayload() {
         return {
@@ -598,21 +649,24 @@ export default function QuestScreen() {
                 </SystemPanel>
             ) : null}
 
-            <SystemPanel systemId={effectiveSystemId} tone="accent">
-                <Label>Add to Campaign</Label>
-
+            <DisclosurePanel
+                systemId={effectiveSystemId}
+                tone="accent"
+                title="Campaign Link"
+                summary={campaignPanelSummary}
+            >
                 {!isPro ? (
                     <View style={styles.proLockedBlock}>
-                <View style={styles.proLockedHeader}>
-                    <Label style={styles.proLockedTitle}>★ {campaignLinkUpsell.lockedTitle}</Label>
-                    <BodyText style={styles.proLockedText}>
-                        {campaignLinkUpsell.lockedMessage}
-                    </BodyText>
-                </View>
+                        <View style={styles.proLockedHeader}>
+                            <Label style={styles.proLockedTitle}>★ {campaignLinkUpsell.lockedTitle}</Label>
+                            <BodyText style={styles.proLockedText}>
+                                {campaignLinkUpsell.lockedMessage}
+                            </BodyText>
+                        </View>
 
-                <BodyText style={styles.proLockedHint}>
-                    {campaignLinkUpsell.message}
-                </BodyText>
+                        <BodyText style={styles.proLockedHint}>
+                            {campaignLinkUpsell.message}
+                        </BodyText>
 
                         <Pressable onPress={handleUpgradePress} style={[styles.inlineUpgradeButton, { backgroundColor: palette.accent }]}>
                             <Label style={styles.inlineUpgradeButtonText}>{campaignLinkUpsell.buttonLabel}</Label>
@@ -683,7 +737,15 @@ export default function QuestScreen() {
                         ) : null}
                     </View>
                 ) : null}
+            </DisclosurePanel>
 
+            <DisclosurePanel
+                systemId={effectiveSystemId}
+                tone="accent"
+                title="Quick Setup"
+                summary={quickSetupSummary}
+                defaultOpen
+            >
                 <Label>{questConfig.labels.factionName}</Label>
                 <AppInput
                     value={factionName}
@@ -735,7 +797,15 @@ export default function QuestScreen() {
                         );
                     })}
                 </View>
+            </DisclosurePanel>
 
+            <DisclosurePanel
+                systemId={effectiveSystemId}
+                title="Advanced Details"
+                summary={advancedSummary}
+                open={advancedOpen}
+                onOpenChange={setAdvancedOpen}
+            >
                 <Label>{questConfig.labels.structure}</Label>
                 <View style={styles.pillRow}>
                     {QUEST_STRUCTURE_OPTIONS.map((option) => {
@@ -800,34 +870,37 @@ export default function QuestScreen() {
                     placeholder={questConfig.labels.notesPlaceholder}
                     multiline
                 />
+
                 <Pressable onPress={() => setVariationSeed((seed) => seed + 1)} style={styles.secondaryButton}>
                     <Label style={styles.secondaryButtonText}>{questConfig.labels.rerollButton}</Label>
                 </Pressable>
+            </DisclosurePanel>
 
-                <View style={styles.saveRow}>
+            <SystemPanel systemId={effectiveSystemId} tone="accent">
+                <Label>Save</Label>
+                <BodyText>{savePanelSummary}</BodyText>
+
+                <Pressable
+                    onPress={() => handleSaveProject(false)}
+                    disabled={saving || loadingSession}
+                    style={[
+                        styles.saveButton,
+                        styles.primaryActionButton,
+                        { backgroundColor: palette.accent },
+                        (saving || loadingSession) && styles.saveButtonDisabled,
+                    ]}
+                >
+                    <Label style={styles.saveButtonText}>{primarySaveLabel}</Label>
+                </Pressable>
+
+                <Pressable onPress={() => setMoreSaveActionsOpen((value) => !value)} style={styles.moreActionsButton}>
+                    <Label style={styles.moreActionsButtonText}>
+                        {moreSaveActionsOpen ? 'Hide more save options' : 'More save options'}
+                    </Label>
+                </Pressable>
+
+                {moreSaveActionsOpen ? (
                     <View style={styles.actionRow}>
-                        <Pressable
-                            onPress={() => handleSaveProject(false)}
-                            disabled={saving || loadingSession}
-                            style={[
-                                styles.saveButton,
-                                { backgroundColor: palette.accent },
-                                (saving || loadingSession) && styles.saveButtonDisabled,
-                            ]}
-                        >
-                            <Label style={styles.saveButtonText}>
-                                {saving
-                                    ? 'Saving...'
-                                    : currentProjectId
-                                        ? selectedCampaignId
-                                            ? 'Update Campaign Save'
-                                            : 'Update Save'
-                                        : selectedCampaignId
-                                            ? 'Save to Campaign'
-                                            : 'Save Plan'}
-                            </Label>
-                        </Pressable>
-
                         <Pressable
                             onPress={handleSaveAsNew}
                             disabled={saving || loadingSession || !sessionUserId}
@@ -854,38 +927,33 @@ export default function QuestScreen() {
                             </Label>
                         </Pressable>
                     </View>
+                ) : null}
 
-                    {loadingSession ? (
-                        <View style={styles.sessionRow}>
-                            <ActivityIndicator />
-                            <BodyText>Checking account...</BodyText>
-                        </View>
-                    ) : sessionUserId ? (
-                        <BodyText>
-                            {currentProjectId
-                                ? 'This is an existing save. Saving keeps it tied to the selected campaign, or you can make a fresh copy.'
-                                : selectedCampaignId
-                                    ? 'Signed in. Saving will add this plan to the selected campaign by default.'
-                                    : 'Signed in. Saving is enabled.'}
-                        </BodyText>
-                    ) : (
-                        <BodyText>Not signed in. You can generate quests, but not save yet.</BodyText>
-                    )}
+                {loadingSession ? (
+                    <View style={styles.sessionRow}>
+                        <ActivityIndicator />
+                        <BodyText>Checking account...</BodyText>
+                    </View>
+                ) : (
+                    <BodyText>{saveHelperText}</BodyText>
+                )}
 
-                    {sessionUserId && isCreatingNewProject && isAtFreeLimit ? (
-                        <UpgradeBanner
-                            title={freeLimitUpsell.title}
-                            message={freeLimitUpsell.message}
-                            buttonLabel={freeLimitUpsell.buttonLabel}
-                            onPress={handleUpgradePress}
-                        />
-                    ) : null}
-                </View>
+                {sessionUserId && isCreatingNewProject && isAtFreeLimit ? (
+                    <UpgradeBanner
+                        title={freeLimitUpsell.title}
+                        message={freeLimitUpsell.message}
+                        buttonLabel={freeLimitUpsell.buttonLabel}
+                        onPress={handleUpgradePress}
+                    />
+                ) : null}
             </SystemPanel>
 
             {dndCampaignContext ? (
-                <SystemPanel systemId={effectiveSystemId}>
-                    <Label>Campaign Hooks</Label>
+                <DisclosurePanel
+                    systemId={effectiveSystemId}
+                    title="Campaign Hooks"
+                    summary={dndCampaignContext.partyHookLines[0] ?? dndCampaignContext.npcSummaryLines[0] ?? 'No campaign hooks logged yet.'}
+                >
                     <View style={styles.resultRow}>
                         {dndCampaignContext.partyHookLines.length > 0 ? (
                             dndCampaignContext.partyHookLines.slice(0, 4).map((entry, index) => (
@@ -902,56 +970,84 @@ export default function QuestScreen() {
                             <BodyText>No NPC web is logged in the linked campaign yet.</BodyText>
                         )}
                     </View>
-                </SystemPanel>
+                </DisclosurePanel>
             ) : null}
 
-            <SystemPanel systemId={effectiveSystemId}>
-                <Label>{questConfig.labels.hook}</Label>
-                <View style={styles.resultRow}>
-                    <BodyText>{result.hook}</BodyText>
-                    <BodyText>{result.objective}</BodyText>
-                    <BodyText>{questConfig.labels.siteFrame}: {result.siteFrame}</BodyText>
-                    {dndCampaignContext?.campaignSummary ? (
-                        <BodyText>Campaign frame: {dndCampaignContext.campaignSummary}</BodyText>
-                    ) : null}
+            <SystemPanel systemId={effectiveSystemId} tone="accent">
+                <Label>Adventure Snapshot</Label>
+                <BodyText>{result.objective}</BodyText>
+                <BodyText>{result.hook}</BodyText>
+
+                <View style={styles.summaryStatRow}>
+                    <View style={styles.summaryStatCard}>
+                        <Label style={styles.summaryStatLabel}>Structure</Label>
+                        <BodyText>{questConfig.structureLabels[structure]}</BodyText>
+                    </View>
+
+                    <View style={styles.summaryStatCard}>
+                        <Label style={styles.summaryStatLabel}>Approach</Label>
+                        <BodyText>{questConfig.resolutionLabels[resolutionStyle]}</BodyText>
+                    </View>
+
+                    <View style={styles.summaryStatCard}>
+                        <Label style={styles.summaryStatLabel}>Fallout</Label>
+                        <BodyText>{questConfig.impactLabels[factionImpact]}</BodyText>
+                    </View>
                 </View>
+
+                <BodyText>{questConfig.labels.siteFrame}: {result.siteFrame}</BodyText>
+                {dndCampaignContext?.campaignSummary ? (
+                    <BodyText>Campaign frame: {dndCampaignContext.campaignSummary}</BodyText>
+                ) : null}
             </SystemPanel>
 
-            <SystemPanel systemId={effectiveSystemId}>
-                <Label>{questConfig.labels.complication}</Label>
+            <DisclosurePanel
+                systemId={effectiveSystemId}
+                title={questConfig.labels.complication}
+                summary={`${result.complication} • ${result.twist}`}
+            >
                 <View style={styles.resultRow}>
                     <BodyText>{questConfig.labels.complication}: {result.complication}</BodyText>
                     <BodyText>{questConfig.labels.twistLead}: {result.twist}</BodyText>
                     <BodyText>{questConfig.labels.alternateResolutionLead}: {result.alternateResolution}</BodyText>
                 </View>
-            </SystemPanel>
+            </DisclosurePanel>
 
-            <SystemPanel systemId={effectiveSystemId}>
-                <Label>{questConfig.labels.reward}</Label>
+            <DisclosurePanel
+                systemId={effectiveSystemId}
+                title={questConfig.labels.reward}
+                summary={`${result.reward} • ${result.consequence}`}
+            >
                 <View style={styles.resultRow}>
                     <BodyText>{questConfig.labels.rewardLead}: {result.reward}</BodyText>
                     <BodyText>{questConfig.labels.consequenceLead}: {result.consequence}</BodyText>
                     <BodyText>{questConfig.labels.factionPressureLead}: {result.factionPressure}</BodyText>
                 </View>
-            </SystemPanel>
+            </DisclosurePanel>
 
-            <SystemPanel systemId={effectiveSystemId}>
-                <Label>{questConfig.labels.arc}</Label>
+            <DisclosurePanel
+                systemId={effectiveSystemId}
+                title={questConfig.labels.arc}
+                summary={result.questArc[0]}
+            >
                 <View style={styles.resultRow}>
                     {result.questArc.map((entry, index) => (
                         <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
                     ))}
                 </View>
-            </SystemPanel>
+            </DisclosurePanel>
 
-            <SystemPanel systemId={effectiveSystemId}>
-                <Label>{questConfig.labels.sceneIdeas}</Label>
+            <DisclosurePanel
+                systemId={effectiveSystemId}
+                title={questConfig.labels.sceneIdeas}
+                summary={result.sceneIdeas[0]}
+            >
                 <View style={styles.resultRow}>
                     {result.sceneIdeas.map((entry, index) => (
                         <BodyText key={`${entry}-${index}`}>• {entry}</BodyText>
                     ))}
                 </View>
-            </SystemPanel>
+            </DisclosurePanel>
         </Screen>
     );
 }
@@ -1001,6 +1097,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    primaryActionButton: {
+        alignSelf: 'stretch',
+    },
     campaignButton: {
         backgroundColor: Colors.elevated,
         borderRadius: 16,
@@ -1031,6 +1130,13 @@ const styles = StyleSheet.create({
         borderColor: Colors.border,
     },
     secondaryButtonText: {
+        color: Colors.text,
+    },
+    moreActionsButton: {
+        alignSelf: 'flex-start',
+        paddingVertical: 4,
+    },
+    moreActionsButtonText: {
         color: Colors.text,
     },
     proLockedBlock: {
@@ -1081,6 +1187,24 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: Spacing.sm,
+    },
+    summaryStatRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.sm,
+    },
+    summaryStatCard: {
+        minWidth: 132,
+        backgroundColor: Colors.elevated,
+        borderWidth: 1,
+        borderColor: Colors.border,
+        borderRadius: 16,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        gap: 4,
+    },
+    summaryStatLabel: {
+        fontSize: 12,
     },
     resultRow: {
         gap: 8,
